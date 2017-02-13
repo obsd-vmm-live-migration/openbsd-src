@@ -102,7 +102,7 @@ uint8_t vcpu_done[VMM_MAX_VCPUS_PER_VM];
 
 pthread_mutex_t pause_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t pause_cond = PTHREAD_COND_INITIALIZER;
-int paused_vcpus = 0;
+unsigned int paused_vcpus = 0;
 int paused = 0;
 
 /*
@@ -403,7 +403,6 @@ void mwrite(int fd, struct vm_mem_range *vmr) {
 void pause_vm(struct vm_create_params *vcp) {
 	int ret;
 	if (paused == 0) {
-		paused = 1;
 		ret = pthread_mutex_lock(&pause_mutex);
 
 		if (ret) {
@@ -412,6 +411,7 @@ void pause_vm(struct vm_create_params *vcp) {
 		}
 
 		paused_vcpus = 0;
+		paused = 1;
 		ret = pthread_cond_wait(&pause_cond,
 			    &pause_mutex);
 
@@ -906,6 +906,7 @@ vcpu_run_loop(void *arg)
 	intptr_t ret = 0;
 	int irq;
 	uint32_t n;
+	struct vm_create_params	*vcp = &current_vm->vm_params.vmc_params;
 
 	vrp->vrp_continue = 0;
 	n = vrp->vrp_vcpu_id;
@@ -936,21 +937,22 @@ vcpu_run_loop(void *arg)
 					log_warnx("%s: can't unlock pause mutex",
 					   __func__);
 				}
-				if (paused_vcpus == VMM_MAX_VCPUS_PER_VM){
+				if (paused_vcpus == vcp->vcp_ncpus){
 					pthread_cond_signal(&pause_cond);
 				}
+				while (paused) {
+					ret = pthread_cond_wait(&vcpu_run_cond[n],
+			    				&vcpu_run_mtx[n]);
+					if (ret) {
+						log_warnx("%s: can't wait on cond (%d)",
+				    		   __func__, (int)ret);
+						(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
+						break;
+					}
 
-			}
-			ret = pthread_cond_wait(&vcpu_run_cond[n],
-			    &vcpu_run_mtx[n]);
-
-			if (ret) {
-				log_warnx("%s: can't wait on cond (%d)",
-				    __func__, (int)ret);
-				(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
-				break;
-			}
-
+				}
+	
+			}	
 			if (paused_vcpus > 0) {
 				ret = pthread_mutex_lock(&pause_mutex);
 
@@ -966,6 +968,17 @@ vcpu_run_loop(void *arg)
 				if (ret) {
 					log_warnx("%s: can't unlock pause mutex",
 					   __func__);
+				}
+			}
+			if (vcpu_hlt[n]) {
+				ret = pthread_cond_wait(&vcpu_run_cond[n],
+			    			&vcpu_run_mtx[n]);
+
+				if (ret) {
+					log_warnx("%s: can't wait on cond (%d)",
+				    	__func__, (int)ret);
+					(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
+					break;
 				}
 			}
 		}
