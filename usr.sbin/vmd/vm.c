@@ -78,7 +78,7 @@ uint8_t vcpu_exit_pci(struct vm_run_params *);
 int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
 void send_vm(int, struct vm_create_params *);
 void mwrite(int , struct vm_mem_range *);
-void pause_vm(void);
+void pause_vm(struct vm_create_params *);
 void receive_vm(int);
 void unpause_vm(struct vm_create_params *);
 
@@ -102,6 +102,7 @@ uint8_t vcpu_done[VMM_MAX_VCPUS_PER_VM];
 
 pthread_mutex_t pause_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t resume_cond = PTHREAD_COND_INITIALIZER;
+int paused_vcpus = 0;
 int paused = 0;
 
 /*
@@ -310,7 +311,7 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 		case IMSG_VMDOP_PAUSE_VM:
 			vmr.vmr_result = 0;
 			vmr.vmr_id = vm->vm_params.vmc_params.vcp_id;
-			pause_vm();
+			pause_vm(&vm->vm_params.vmc_params);
 			log_info("paused vm: %d", vmr.vmr_id);
 			imsg_compose_event(&vm->vm_iev,
 				IMSG_VMDOP_PAUSE_VM_RESPONSE, imsg.hdr.peerid, imsg.hdr.pid,
@@ -346,7 +347,7 @@ void send_vm(int fd, struct vm_create_params *vcp) {
 	char buf[PAGE_SIZE];
 	struct vm_mem_range *vmr;
 	struct vm_rwregs_params vrp;
-	pause_vm();
+	pause_vm(&vcp);
 
 	vrp.vrwp_vm_id = vcp->vcp_id;
 	log_info("vcp_id %d", vcp->vcp_id);
@@ -399,17 +400,20 @@ void mwrite(int fd, struct vm_mem_range *vmr) {
 
 }
 
-void pause_vm() {
+void pause_vm(struct vm_create_params *vcp) {
 	if (paused == 0) {
 		paused = 1;
-
+		paused_vcpus = 0;
+		while (paused < vcp->vcp_ncpus) {
+		}
 	}
 }
 void unpause_vm(struct vm_create_params *vcp) {
 	if (paused) {
 		paused = 0;
+		paused_vcpus = vcp->vcp_ncpus;
 		int n;
-		for (n = 0; n <= vcp->vcp_ncpus; n++) {
+		for (n = 0; n < vcp->vcp_ncpus; n++) {
 			pthread_cond_broadcast(&vcpu_run_cond[n]);
 		}
 	}
@@ -895,6 +899,23 @@ vcpu_run_loop(void *arg)
 
 		/* If we are halted or paused, wait */
 		if (vcpu_hlt[n] || paused) {
+			if (paused) {
+				ret = pthread_mutex_lock(&pause_mutex);
+
+				if (ret) {
+					log_warnx("%s: can't lock pause mutex",
+					   __func__);
+				}
+
+				paused_vcpus += 1;
+				ret = pthread_mutex_unlock(&pause_mutex);
+
+				if (ret) {
+					log_warnx("%s: can't unlock pause mutex",
+					   __func__);
+				}
+
+			}
 			ret = pthread_cond_wait(&vcpu_run_cond[n],
 			    &vcpu_run_mtx[n]);
 
@@ -903,6 +924,24 @@ vcpu_run_loop(void *arg)
 				    __func__, (int)ret);
 				(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
 				break;
+			}
+
+			if (paused_vcpus > 0) {
+				ret = pthread_mutex_lock(&pause_mutex);
+
+				if (ret) {
+					log_warnx("%s: can't lock pause mutex",
+					   __func__);
+				}
+
+				paused_vcpus -= 1;
+
+				ret = pthread_mutex_unlock(&pause_mutex);
+
+				if (ret) {
+					log_warnx("%s: can't unlock pause mutex",
+					   __func__);
+				}
 			}
 		}
 
