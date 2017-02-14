@@ -112,7 +112,6 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	struct vmop_id vid;
 	struct vmop_result	 vmr;
 	struct vmop_create_params vmc;
-	struct vm_rwregs_params vrp;
 	uint32_t		 id = 0;
 	unsigned int		 mode;
 
@@ -222,7 +221,7 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	case IMSG_VMDOP_RECEIVE_VM_END:
 		id = imsg->hdr.peerid;
 		vm = vm_getbyvmid(id);
-		log_info("Receiving vm_name: %d", vm);
+		log_info("Receiving vm_name: %p", vm);
 		log_info("vm_id: %d", id);
 
 		vmm_receive_vm(vm, imsg->fd);
@@ -591,7 +590,6 @@ vmm_receive_vm(struct vmd_vm *vm, int fd)
 	struct vm_create_params	*vcp;
 	int			 ret = EINVAL;
 	int			 fds[2];
-	size_t			 i;
 
 	vcp = &vm->vm_params.vmc_params;
 

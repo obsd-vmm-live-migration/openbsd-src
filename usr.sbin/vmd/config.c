@@ -40,6 +40,9 @@
 
 /* Supported bridge types */
 const char *vmd_descsw[] = { "switch", "bridge", NULL };
+int config_get_receivedvm(struct privsep *ps, struct imsg *imsg);
+int config_getdisk(struct privsep *ps, struct imsg *imsg);
+
 
 int
 config_init(struct vmd *env)

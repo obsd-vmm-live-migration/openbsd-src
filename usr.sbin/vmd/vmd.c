@@ -170,8 +170,8 @@ vmd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 			log_info("Incomplete vmc %d", ret);
 		}
 		log_info("Got vmc %s", vmc.vmc_params.vcp_name);
-		strcpy(vmc.vmc_params.vcp_name, vid.vid_name);
-		vmc.vmc_params.vcp_id = NULL;
+		strlcpy(vmc.vmc_params.vcp_name, vid.vid_name, sizeof(vmc.vmc_params.vcp_name));
+		vmc.vmc_params.vcp_id = 0;
 
 		ret = vm_register(ps, &vmc, &vm, 0, vmc.vmc_uid);
 		log_info("Register ret: %d", ret);
