@@ -490,10 +490,6 @@ void pause_vm(struct vm_create_params *vcp) {
 	if (paused == 0) {
 		paused_vcpus = 0;
 		paused = 1;
-                while (paused_vcpus != vcp->vcp_ncpus) {
-			sleep(1);
-			log_info("paused_vcpus: %d, vcpus: %zu", paused_vcpus, vcp->vcp_ncpus);
-		}
 		return;
 	}
 }
@@ -1004,10 +1000,8 @@ vcpu_run_loop(void *arg)
 
 		/* If we are halted or paused, wait */
 		if (vcpu_hlt[n]) {
-			if (paused) {
-				log_info("inside pause loop");
+			if (paused == 1) {
 				paused_vcpus += 1;
-				log_info("paused_vcpus: %d, vcpus: %zu", paused_vcpus, vcp->vcp_ncpus);
 				while (paused) {
 					ret = pthread_cond_wait(&vcpu_run_cond[n],
 			    				&vcpu_run_mtx[n]);
@@ -1017,14 +1011,12 @@ vcpu_run_loop(void *arg)
 						(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
 						break;
 					}
-
-				}
-	
+				}	
 			}	
 			if (paused_vcpus > 0) {
 				paused_vcpus -= 1;
 			}
-			if (vcpu_hlt[n] && paused == -1) {
+			if (vcpu_hlt[n]) {
 				ret = pthread_cond_wait(&vcpu_run_cond[n],
 			    			&vcpu_run_mtx[n]);
 
