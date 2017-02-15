@@ -349,7 +349,7 @@ void
 i8253_dump(int fd) {
 	int ret;
 	ret = write(fd, &i8253_channel, sizeof(i8253_channel));
-	log_debug("Sending PIT");
+	log_debug("%s: Sending PIT", __func__);
 }
 
 
@@ -369,7 +369,7 @@ i8253_restore(FILE *fp, uint32_t vm_id) {
 	evtimer_set(&i8253_channel[1].timer, i8253_fire, &i8253_channel[1]);
 	evtimer_set(&i8253_channel[2].timer, i8253_fire, &i8253_channel[2]);
 	i8253_reset(0);
-	log_debug("Receiving PIT");
+	log_debug("%s: Receiving PIT", __func__);
 }
 
 void

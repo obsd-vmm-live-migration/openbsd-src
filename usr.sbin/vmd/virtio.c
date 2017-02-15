@@ -1862,7 +1862,8 @@ vionet_restore(FILE *fp, struct vm_create_params *vcp, int *child_taps) {
 			    __progname);
 			return;
 		}
-		ret = fread(vionet, vcp->vcp_nnics, sizeof(struct vionet_dev), fp);
+		ret = fread(vionet, vcp->vcp_nnics, 
+		    sizeof(struct vionet_dev), fp);
 
 		/* Virtio network */
 		for (i = 0; i < vcp->vcp_nnics; i++) {
@@ -1943,7 +1944,8 @@ vioblk_restore(FILE *fp, struct vm_create_params *vcp, int *child_disks) {
 }
 
 void
-virtio_restore(FILE *fp, struct vm_create_params *vcp, int *child_disks, int *child_taps) {
+virtio_restore(FILE *fp, struct vm_create_params *vcp,
+    int *child_disks, int *child_taps) {
 	viornd_restore(fp);
 	vioblk_restore(fp, vcp, child_disks);
 	vionet_restore(fp, vcp, child_taps);
