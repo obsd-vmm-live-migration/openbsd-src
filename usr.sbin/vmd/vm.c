@@ -411,6 +411,103 @@ vm_shutdown(unsigned int cmd)
 	_exit(0);
 }
 
+void send_vm(int fd, struct vm_create_params *vcp) {
+	unsigned int i;
+	int ret;
+	struct vm_mem_range *vmr;
+	struct vm_rwregs_params vrp;
+	struct vmop_create_params *vmc;
+	unsigned int flags = 0;
+	vmc = calloc(1, sizeof(struct vmop_create_params));
+	flags |= VMOP_CREATE_MEMORY;
+	memcpy(&vmc->vmc_params, vcp, sizeof(struct vm_create_params));
+	vmc->vmc_flags = flags;
+
+	log_info("paaaausing");
+
+	/* pause_vm(vcp); */
+	log_info("paaaaused");
+
+	vrp.vrwp_vm_id = vcp->vcp_id;
+	vrp.vrwp_mask = -1;
+	log_info("vcp_id %d", vcp->vcp_id);
+
+	for (i = 0; i < vcp->vcp_ncpus; i++) {
+		vrp.vrwp_vcpu_id = i;
+		if (ioctl(env->vmd_fd, VMM_IOC_READREGS, &vrp) < 0) {
+			log_info ("readregs IOC error: %d, %d", errno, ENOENT);
+		}
+	}
+
+	ret = write(fd, vmc, sizeof(struct vmop_create_params));
+	log_info("write ret: %d", ret);
+
+	ret = write(fd, &vrp, sizeof(struct vm_rwregs_params));
+	log_info("write ret: %d", ret);
+
+	dump_regs(&vrp.vrwp_regs);
+
+	/* log_info("Send RAX: %d", vrp.vrwp_regs.vrs_gprs[VCPU_REGS_RAX]); */
+	/* log_info("Send RIP: %d", vrp.vrwp_regs.vrs_gprs[VCPU_REGS_RIP]); */
+
+	for (i = 0; i < vcp->vcp_nmemranges; i++) {
+		vmr = &vcp->vcp_memranges[i];
+		log_info("writing to fd %zu\n", vmr->vmr_size);
+		mwrite(fd, vmr);
+	}
+	/* unpause_vm(vcp); */
+	close(fd);
+	log_info("DONE!");
+}
+
+void mwrite(int fd, struct vm_mem_range *vmr) {
+	size_t rem = vmr->vmr_size, read=0;
+	int i;
+	char buf[PAGE_SIZE];
+	while (rem > 0) {
+		i = read_mem(vmr->vmr_gpa + read, buf, PAGE_SIZE);
+		if (i!=0) {
+			log_info("problem in read_mem");
+		}
+		i = write(fd, buf, PAGE_SIZE);
+		if (i!=PAGE_SIZE) {
+			log_info("problem %d", i);
+			return;
+		}
+		rem = rem - PAGE_SIZE;
+		if (rem < PAGE_SIZE *2) {
+			log_info("rem: %zu", rem);
+		}
+		read = read + PAGE_SIZE;
+	}
+	if(read != vmr->vmr_size) {
+		log_info("read != vmr->vmr_size");
+	}
+
+}
+
+void pause_vm(struct vm_create_params *vcp) {
+	if (paused == 0) {
+		paused_vcpus = 0;
+		paused = 1;
+                while (paused_vcpus != vcp->vcp_ncpus) {
+			sleep(1);
+			log_info("paused_vcpus: %d, vcpus: %zu", paused_vcpus, vcp->vcp_ncpus);
+		}
+		return;
+	}
+}
+
+void unpause_vm(struct vm_create_params *vcp) {
+	if (paused) {
+		paused = 0;
+		unsigned int n;
+		for (n = 0; n <= vcp->vcp_ncpus; n++) {
+			pthread_cond_broadcast(&vcpu_run_cond[n]);
+		}
+	}
+}
+
 /*
  * vcpu_reset
  *
@@ -905,16 +1002,38 @@ vcpu_run_loop(void *arg)
 			return ((void *)ret);
 		}
 
-		/* If we are halted, wait */
+		/* If we are halted or paused, wait */
 		if (vcpu_hlt[n]) {
-			ret = pthread_cond_wait(&vcpu_run_cond[n],
-			    &vcpu_run_mtx[n]);
+			if (paused) {
+				log_info("inside pause loop");
+				paused_vcpus += 1;
+				log_info("paused_vcpus: %d, vcpus: %zu", paused_vcpus, vcp->vcp_ncpus);
+				while (paused) {
+					ret = pthread_cond_wait(&vcpu_run_cond[n],
+			    				&vcpu_run_mtx[n]);
+					if (ret) {
+						log_warnx("%s: can't wait on cond (%d)",
+				    		   __func__, (int)ret);
+						(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
+						break;
+					}
 
-			if (ret) {
-				log_warnx("%s: can't wait on cond (%d)",
-				    __func__, (int)ret);
-				(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
-				break;
+				}
+	
+			}	
+			if (paused_vcpus > 0) {
+				paused_vcpus -= 1;
+			}
+			if (vcpu_hlt[n] && paused == -1) {
+				ret = pthread_cond_wait(&vcpu_run_cond[n],
+			    			&vcpu_run_mtx[n]);
+
+				if (ret) {
+					log_warnx("%s: can't wait on cond (%d)",
+				    	__func__, (int)ret);
+					(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
+					break;
+				}
 			}
 		}
 
