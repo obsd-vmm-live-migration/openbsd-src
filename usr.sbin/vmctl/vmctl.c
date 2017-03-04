@@ -184,6 +184,157 @@ vm_start_complete(struct imsg *imsg, int *ret, int autoconnect)
 	return (1);
 }
 
+void
+send_vm(uint32_t id, const char *name)
+{
+	struct vmop_id vid;
+	int fds[2], ret;
+	char buf[4096] = {NULL};
+
+	memset(&vid, 0, sizeof(vid));
+	vid.vid_id = id;
+	if (name != NULL)
+		(void)strlcpy(vid.vid_name, name, sizeof(vid.vid_name));
+
+	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, fds) == -1)
+		warnx("socketpair");
+	
+	printf("Ret: %d\n", IMSG_VMDOP_SEND_VM);
+
+	ret = imsg_compose(ibuf, IMSG_VMDOP_SEND_VM, 0, 0, fds[1],
+	    &vid, sizeof(vid));
+
+	while (ibuf->w.queued)
+		if (msgbuf_write(&ibuf->w) <= 0 && errno != EAGAIN)
+			err(1, "write error");
+
+	printf("Ret: %d\n", ret);
+	printf("Reading from fd\n");
+	while(1) {
+		ret = read(fds[0], buf, 4095);
+		if(!ret) {
+			break;
+		}
+		write(1, buf, ret);
+	}
+	/* printf("Read from fd\n"); */
+	/* printf("%s", buf); */
+	/* close(fds[1]); */
+	/* ret = dup2(fds[0], 1); */
+	/* printf("%d\n", ret); */
+}
+
+void
+receive_vm(uint32_t id, const char *name)
+{
+	struct vmop_id vid;
+	int fds[2], ret;
+	char buf[256] = {NULL};
+
+	memset(&vid, 0, sizeof(vid));
+	vid.vid_id = id;
+	if (name != NULL)
+		(void)strlcpy(vid.vid_name, name, sizeof(vid.vid_name));
+
+	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, fds) == -1)
+		warnx("socketpair");
+
+	ret = imsg_compose(ibuf, IMSG_VMDOP_RECEIVE_VM, 0, 0, fds[1],
+	    &vid, sizeof(vid));
+
+	while (ibuf->w.queued)
+		if (msgbuf_write(&ibuf->w) <= 0 && errno != EAGAIN)
+			err(1, "write error");
+
+	printf("Ret: %d\n", ret);
+	printf("Writing to fd\n");
+	while(1) {
+		ret = read(0, buf, 255);
+		if(!ret) {
+			break;
+		}
+		write(fds[0], buf, ret);
+	}
+}
+
+void
+pause_vm(uint32_t pause_id, const char *name)
+{
+	struct vmop_id vid;
+
+	memset(&vid, 0, sizeof(vid));
+	vid.vid_id = pause_id;
+	if (name != NULL)
+		(void)strlcpy(vid.vid_name, name, sizeof(vid.vid_name));
+
+	imsg_compose(ibuf, IMSG_VMDOP_PAUSE_VM, 0, 0, -1,
+	    &vid, sizeof(vid));
+}
+
+int
+pause_vm_complete(struct imsg *imsg, int *ret)
+{
+	struct vmop_result *vmr;
+	int res;
+
+	if (imsg->hdr.type == IMSG_VMDOP_PAUSE_VM_RESPONSE) {
+		vmr = (struct vmop_result *)imsg->data;
+		res = vmr->vmr_result;
+		if (res) {
+			errno = res;
+			warn("pause vm command failed");
+			*ret = EIO;
+		} else {
+			warnx("paused vm %d successfully", vmr->vmr_id);
+			*ret = 0;
+		}
+	} else {
+		warnx("unexpected response received from vmd");
+		*ret = EINVAL;
+	}
+
+	return (1);
+}
+
+void
+unpause_vm(uint32_t pause_id, const char *name)
+{
+	struct vmop_id vid;
+
+	memset(&vid, 0, sizeof(vid));
+	vid.vid_id = pause_id;
+	if (name != NULL)
+		(void)strlcpy(vid.vid_name, name, sizeof(vid.vid_name));
+
+	imsg_compose(ibuf, IMSG_VMDOP_UNPAUSE_VM, 0, 0, -1,
+	    &vid, sizeof(vid));
+}
+
+int
+unpause_vm_complete(struct imsg *imsg, int *ret)
+{
+	struct vmop_result *vmr;
+	int res;
+
+	if (imsg->hdr.type == IMSG_VMDOP_UNPAUSE_VM_RESPONSE) {
+		vmr = (struct vmop_result *)imsg->data;
+		res = vmr->vmr_result;
+		if (res) {
+			errno = res;
+			warn("unpause vm command failed");
+			*ret = EIO;
+		} else {
+			warnx("unpaused vm %d successfully", vmr->vmr_id);
+			*ret = 0;
+		}
+	} else {
+		warnx("unexpected response received from vmd");
+		*ret = EINVAL;
+	}
+
+	return (1);
+}
+
 /*
  * terminate_vm
  *

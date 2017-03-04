@@ -71,7 +71,7 @@ control_run(struct privsep *ps, struct privsep_proc *p, void *arg)
 	 * unix - for the control socket.
 	 * recvfd - for the proc fd exchange.
 	 */
-	if (pledge("stdio cpath unix recvfd", NULL) == -1)
+	if (pledge("stdio cpath unix recvfd sendfd", NULL) == -1)
 		fatal("pledge");
 }
 
@@ -82,6 +82,8 @@ control_dispatch_vmd(int fd, struct privsep_proc *p, struct imsg *imsg)
 
 	switch (imsg->hdr.type) {
 	case IMSG_VMDOP_START_VM_RESPONSE:
+	case IMSG_VMDOP_PAUSE_VM_RESPONSE:
+	case IMSG_VMDOP_UNPAUSE_VM_RESPONSE:
 	case IMSG_VMDOP_TERMINATE_VM_RESPONSE:
 	case IMSG_VMDOP_GET_INFO_VM_DATA:
 	case IMSG_VMDOP_GET_INFO_VM_END_DATA:
@@ -388,6 +390,25 @@ control_dispatch_imsg(int fd, short event, void *arg)
 				goto fail;
 			if (proc_compose_imsg(ps, PROC_PARENT, -1,
 			    imsg.hdr.type, fd, -1, NULL, 0) == -1) {
+				control_close(fd, cs);
+				return;
+			}
+			break;
+		case IMSG_VMDOP_SEND_VM:
+		case IMSG_VMDOP_RECEIVE_VM:
+			if (proc_compose_imsg(ps, PROC_PARENT, -1,
+			    imsg.hdr.type, imsg.hdr.peerid, imsg.fd,
+			    imsg.data, IMSG_DATA_SIZE(&imsg)) == -1) {
+				control_close(fd, cs);
+				return;
+			}
+			break;
+		case IMSG_VMDOP_PAUSE_VM:
+		case IMSG_VMDOP_UNPAUSE_VM:
+			// TODO: Dedup this code
+			if (proc_compose_imsg(ps, PROC_PARENT, -1,
+			    imsg.hdr.type, fd, imsg.fd,
+			    imsg.data, IMSG_DATA_SIZE(&imsg)) == -1) {
 				control_close(fd, cs);
 				return;
 			}

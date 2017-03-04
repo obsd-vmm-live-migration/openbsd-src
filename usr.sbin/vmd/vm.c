@@ -76,6 +76,11 @@ void init_emulated_hw(struct vmop_create_params *, int *, int *);
 void vcpu_exit_inout(struct vm_run_params *);
 uint8_t vcpu_exit_pci(struct vm_run_params *);
 int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
+void send_vm(int, struct vm_create_params *);
+void mwrite(int , struct vm_mem_range *);
+void pause_vm(void);
+void receive_vm(int);
+void unpause_vm(struct vm_create_params *);
 
 static struct vm_mem_range *find_gpa_range(struct vm_create_params *, paddr_t,
     size_t);
@@ -94,6 +99,10 @@ pthread_cond_t vcpu_run_cond[VMM_MAX_VCPUS_PER_VM];
 pthread_mutex_t vcpu_run_mtx[VMM_MAX_VCPUS_PER_VM];
 uint8_t vcpu_hlt[VMM_MAX_VCPUS_PER_VM];
 uint8_t vcpu_done[VMM_MAX_VCPUS_PER_VM];
+
+pthread_mutex_t pause_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t resume_cond = PTHREAD_COND_INITIALIZER;
+int paused = 0;
 
 /*
  * Represents a standard register set for an OS to be booted
@@ -194,9 +203,10 @@ start_vm(struct vmd_vm *vm, int fd)
 	/*
 	 * pledge in the vm processes:
 	 * stdio - for malloc and basic I/O including events.
+	 * recvfd - for send/recv.
 	 * vmm - for the vmm ioctls and operations.
 	 */
-	if (pledge("stdio vmm", NULL) == -1)
+	if (pledge("stdio vmm recvfd", NULL) == -1)
 		fatal("pledge");
 
 	/*
@@ -250,6 +260,7 @@ void
 vm_dispatch_vmm(int fd, short event, void *arg)
 {
 	struct vmd_vm		*vm = arg;
+	struct vmop_result vmr;
 	struct imsgev		*iev = &vm->vm_iev;
 	struct imsgbuf		*ibuf = &iev->ibuf;
 	struct imsg		 imsg;
@@ -296,6 +307,29 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 			if (vmmci_ctl(VMMCI_REBOOT) == -1)
 				_exit(0);
 			break;
+		case IMSG_VMDOP_PAUSE_VM:
+			vmr.vmr_result = 0;
+			vmr.vmr_id = vm->vm_params.vmc_params.vcp_id;
+			pause_vm();
+			log_info("paused vm: %d", vmr.vmr_id);
+			imsg_compose_event(&vm->vm_iev,
+				IMSG_VMDOP_PAUSE_VM_RESPONSE, imsg.hdr.peerid, imsg.hdr.pid,
+				-1, &vmr, sizeof(vmr));
+			break;
+		case IMSG_VMDOP_UNPAUSE_VM:
+			vmr.vmr_result = 0;
+			vmr.vmr_id = vm->vm_params.vmc_params.vcp_id;
+			unpause_vm(&vm->vm_params.vmc_params);
+			log_info("unpaused vm: %d", vmr.vmr_id);
+			imsg_compose_event(&vm->vm_iev,
+				IMSG_VMDOP_UNPAUSE_VM_RESPONSE, imsg.hdr.peerid, imsg.hdr.pid,
+				-1, &vmr, sizeof(vmr));
+			break;
+		case IMSG_VMDOP_SEND_VM:
+			vmr.vmr_result = 0;
+			vmr.vmr_id = vm->vm_params.vmc_params.vcp_id;
+			send_vm(imsg.fd, &vm->vm_params.vmc_params);
+			break;
 		default:
 			fatalx("%s: got invalid imsg %d from %s",
 			    __func__, imsg.hdr.type,
@@ -304,6 +338,81 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 		imsg_free(&imsg);
 	}
 	imsg_event_add(iev);
+}
+
+void send_vm(int fd, struct vm_create_params *vcp) {
+	int i;
+	int ret;
+	char buf[PAGE_SIZE];
+	struct vm_mem_range *vmr;
+	struct vm_rwregs_params vrp;
+	pause_vm();
+
+	vrp.vrwp_vm_id = vcp->vcp_id;
+	log_info("vcp_id %d", vcp->vcp_id);
+
+	for (i = 0; i < vcp->vcp_ncpus; i++) {
+		vrp.vrwp_vcpu_id = i;
+		if (ioctl(env->vmd_fd, VMM_IOC_READREGS, &vrp) < 0) {
+			log_info ("readregs IOC error: %d, %d", errno, ENOENT);
+		}
+	}
+
+	/* memcpy(&buf, vcp, sizeof(struct vm_create_params)); */
+	/* ret = write(fd, buf, sizeof(struct vm_create_params)); */
+	ret = write(fd, vcp, sizeof(struct vm_create_params));
+	log_info("write ret: %d", ret);
+
+	/* memcpy(&buf, vcp, sizeof(struct vm_rwregs_params)); */
+	ret = write(fd, vcp, sizeof(struct vm_rwregs_params));
+	log_info("write ret: %d", ret);
+
+	log_info("vcp size: %d", sizeof(struct vm_create_params));
+	log_info("regs size: %d", sizeof(struct vm_rwregs_params));
+
+    /*  */
+	/* if (ioctl(env->vmd_fd, VMM_IOC_READREGS, &vm_regs2) < 0) { */
+	/* 	log_info ("readregs IOC error: %d", errno); */
+	/* } */
+
+
+	for (i = 0; i < vcp->vcp_nmemranges; i++) {
+		vmr = &vcp->vcp_memranges[i];
+		log_info("writing to fd %d\n", vmr->vmr_size);
+		mwrite(fd, vmr);
+	}
+	unpause_vm(vcp);
+	close(fd);
+	log_info("DONE!");
+}
+
+void mwrite(int fd, struct vm_mem_range *vmr) {
+	size_t rem = vmr->vmr_size, read=0;
+	int i;
+	char buf[PAGE_SIZE];
+	while (rem > 0) {
+		read_mem(vmr->vmr_gpa + read, buf, PAGE_SIZE);
+		i = write(fd, buf, PAGE_SIZE);
+		rem = rem - PAGE_SIZE;
+		read = read + PAGE_SIZE;
+	}
+
+}
+
+void pause_vm() {
+	if (paused == 0) {
+		paused = 1;
+
+	}
+}
+void unpause_vm(struct vm_create_params *vcp) {
+	if (paused) {
+		paused = 0;
+		int n;
+		for (n = 0; n <= vcp->vcp_ncpus; n++) {
+			pthread_cond_broadcast(&vcpu_run_cond[n]);
+		}
+	}
 }
 
 /*
@@ -784,8 +893,8 @@ vcpu_run_loop(void *arg)
 			return ((void *)ret);
 		}
 
-		/* If we are halted, wait */
-		if (vcpu_hlt[n]) {
+		/* If we are halted or paused, wait */
+		if (vcpu_hlt[n] || paused) {
 			ret = pthread_cond_wait(&vcpu_run_cond[n],
 			    &vcpu_run_mtx[n]);
 

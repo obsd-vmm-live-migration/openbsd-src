@@ -63,6 +63,7 @@ int get_info_vm(struct privsep *, struct imsg *, int);
 int opentap(char *);
 
 extern struct vmd *env;
+struct privsep *vmm_ps;
 
 static struct privsep_proc procs[] = {
 	{ "parent",	PROC_PARENT,	vmm_dispatch_parent  },
@@ -89,9 +90,10 @@ vmm_run(struct privsep *ps, struct privsep_proc *p, void *arg)
 	 * stdio - for malloc and basic I/O including events.
 	 * vmm - for the vmm ioctls and operations.
 	 * proc - for forking and maitaining vms.
+	 * send - for sending send/recv fds to vm proc.
 	 * recvfd - for disks, interfaces and other fds.
 	 */
-	if (pledge("stdio vmm recvfd proc", NULL) == -1)
+	if (pledge("stdio vmm sendfd recvfd proc", NULL) == -1)
 		fatal("pledge");
 
 	/* Get and terminate all running VMs */
@@ -105,9 +107,12 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	int			 res = 0, cmd = 0, verbose;
 	struct vmd_vm		*vm;
 	struct vm_terminate_params vtp;
+	struct vmop_id vid;
 	struct vmop_result	 vmr;
 	uint32_t		 id = 0;
 	unsigned int		 mode;
+
+	vmm_ps = ps;
 
 	switch (imsg->hdr.type) {
 	case IMSG_VMDOP_START_VM_REQUEST:
@@ -192,6 +197,24 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 			    imsg->hdr.type, imsg->hdr.peerid, imsg->hdr.pid,
 			    -1, &verbose, sizeof(verbose));
 		}
+		break;
+	case IMSG_VMDOP_PAUSE_VM:
+	case IMSG_VMDOP_UNPAUSE_VM:
+	case IMSG_VMDOP_SEND_VM:
+		IMSG_SIZE_CHECK(imsg, &vid);
+		memcpy(&vid, imsg->data, sizeof(vid));
+		id = vid.vid_id;
+		vm = vm_getbyid(id);
+		imsg_compose_event(&vm->vm_iev,
+			imsg->hdr.type, imsg->hdr.peerid, imsg->hdr.pid,
+			imsg->fd, &vid, sizeof(vid));
+		break;
+	case IMSG_VMDOP_RECEIVE_VM:
+		IMSG_SIZE_CHECK(imsg, &vid);
+		memcpy(&vid, imsg->data, sizeof(vid));
+		id = vid.vid_id;
+		vm = vm_getbyid(id);
+		/* receive_vm(imsg->fd); */
 		break;
 	default:
 		return (-1);
@@ -377,6 +400,10 @@ vmm_dispatch_vm(int fd, short event, void *arg)
 #endif
 
 		switch (imsg.hdr.type) {
+		case IMSG_VMDOP_UNPAUSE_VM_RESPONSE:
+		case IMSG_VMDOP_PAUSE_VM_RESPONSE:
+			proc_forward_imsg(vmm_ps, &imsg, PROC_PARENT, -1);
+			break;
 		default:
 			fatalx("%s: got invalid imsg %d from %s",
 			    __func__, imsg.hdr.type,

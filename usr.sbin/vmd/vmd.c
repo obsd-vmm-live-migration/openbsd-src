@@ -148,6 +148,18 @@ vmd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 		proc_forward_imsg(ps, imsg, PROC_VMM, -1);
 		proc_forward_imsg(ps, imsg, PROC_PRIV, -1);
 		break;
+	case IMSG_VMDOP_PAUSE_VM:
+	case IMSG_VMDOP_UNPAUSE_VM:
+		IMSG_SIZE_CHECK(imsg, &vid);
+		proc_compose_imsg(ps, PROC_VMM, -1, imsg->hdr.type,
+				imsg->hdr.peerid, -1, imsg->data, IMSG_DATA_SIZE(imsg));
+		break;
+	case IMSG_VMDOP_SEND_VM:
+	case IMSG_VMDOP_RECEIVE_VM:
+		IMSG_SIZE_CHECK(imsg, &vid);
+		proc_compose_imsg(ps, PROC_VMM, -1, imsg->hdr.type,
+				imsg->hdr.peerid, imsg->fd, imsg->data, IMSG_DATA_SIZE(imsg));
+		break;
 	default:
 		return (-1);
 	}
@@ -185,6 +197,13 @@ vmd_dispatch_vmm(int fd, struct privsep_proc *p, struct imsg *imsg)
 	struct vmop_info_result	 vir;
 
 	switch (imsg->hdr.type) {
+	case IMSG_VMDOP_PAUSE_VM_RESPONSE:
+	case IMSG_VMDOP_UNPAUSE_VM_RESPONSE:
+		IMSG_SIZE_CHECK(imsg, &vmr);
+		proc_compose_imsg(ps, PROC_CONTROL, -1,
+					imsg->hdr.type, imsg->hdr.peerid, -1,
+					imsg->data, sizeof(imsg->data));
+		break;
 	case IMSG_VMDOP_START_VM_RESPONSE:
 		IMSG_SIZE_CHECK(imsg, &vmr);
 		memcpy(&vmr, imsg->data, sizeof(vmr));
@@ -511,10 +530,11 @@ vmd_configure(void)
 	 * tty - for openpty.
 	 * proc - run kill to terminate its children safely.
 	 * sendfd - for disks, interfaces and other fds.
+	 * recvfd - for send and receive.
 	 * getpw - lookup user or group id by name.
 	 * chown, fattr - change tty ownership
 	 */
-	if (pledge("stdio rpath wpath proc tty sendfd getpw"
+	if (pledge("stdio rpath wpath proc tty recvfd sendfd getpw"
 	    " chown fattr", NULL) == -1)
 		fatal("pledge");
 
