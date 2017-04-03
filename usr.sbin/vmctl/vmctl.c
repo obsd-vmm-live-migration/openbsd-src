@@ -189,7 +189,7 @@ send_vm(uint32_t id, const char *name)
 {
 	struct vmop_id vid;
 	int fds[2], ret;
-	char buf[4097] = {NULL};
+	char buf[4097] = {0};
 
 	memset(&vid, 0, sizeof(vid));
 	vid.vid_id = id;
@@ -225,7 +225,7 @@ recv_vm(uint32_t id, const char *name)
 {
 	struct vmop_id vid;
 	int fds[2], ret;
-	char buf[4096] = {NULL};
+	char buf[4096] = {0};
 
 	memset(&vid, 0, sizeof(vid));
 	vid.vid_id = id;

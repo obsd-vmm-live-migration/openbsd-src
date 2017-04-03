@@ -78,7 +78,7 @@ uint8_t vcpu_exit_pci(struct vm_run_params *);
 int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
 void send_vm(int, struct vm_create_params *);
 void mwrite(int , struct vm_mem_range *);
-void pause_vm(void);
+void pause_vm(struct vm_create_params *);
 void unpause_vm(struct vm_create_params *);
 void dump_regs(struct vcpu_reg_state *);
 
@@ -101,8 +101,9 @@ uint8_t vcpu_hlt[VMM_MAX_VCPUS_PER_VM];
 uint8_t vcpu_done[VMM_MAX_VCPUS_PER_VM];
 
 pthread_mutex_t pause_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t resume_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t pause_cond = PTHREAD_COND_INITIALIZER;
 int paused = 0;
+unsigned int paused_vcpus = 0;
 
 /*
  * Represents a standard register set for an OS to be booted
@@ -260,22 +261,19 @@ receive_vm(struct vmd_vm *vm, int recv_fd, int fd) {
 	struct vcpu_reg_state	 vrs;
 	int			 nicfds[VMM_MAX_NICS_PER_VM];
 	int			 ret;
-	FILE			*kernfp;
-	struct vmboot_params	 vmboot;
 	struct vm_mem_range *vmr;
 	size_t			 i;
-	char buf[PAGE_SIZE];
 	FILE *recvfp;
 	/* Child */
 
-	log_info("Look ma. I am here %d", vm);
-	log_info("Getting vrp: %d", sizeof(vrp));
+	log_info("Look ma. I am here %p", vm);
+	log_info("Getting vrp: %lu", sizeof(vrp));
 	ret = read(recv_fd, &vrp, sizeof(vrp));
 	if (ret != sizeof(vrp)) {
 		log_info("Incomplete vrp %d", ret);
 	}
-	log_info("Here RAX: %d", vrp.vrwp_regs.vrs_gprs[VCPU_REGS_RAX]);
-	log_info("Here RIP: %d", vrp.vrwp_regs.vrs_gprs[VCPU_REGS_RIP]);
+	log_info("Here RAX: %llu", vrp.vrwp_regs.vrs_gprs[VCPU_REGS_RAX]);
+	log_info("Here RIP: %llu", vrp.vrwp_regs.vrs_gprs[VCPU_REGS_RIP]);
 	setproctitle("%s", vcp->vcp_name);
 	log_procinit(vcp->vcp_name);
 
@@ -297,7 +295,7 @@ receive_vm(struct vmd_vm *vm, int recv_fd, int fd) {
 	recvfp = fdopen(recv_fd, "r");
 	for (i = 0; i < vcp->vcp_nmemranges; i++) {
 		vmr = &vcp->vcp_memranges[i];
-		log_info("reading from fd %d\n", vmr->vmr_size);
+		log_info("reading from fd %zu\n", vmr->vmr_size);
 		mread(recvfp, vmr->vmr_gpa, vmr->vmr_size);
 	}
 
@@ -399,7 +397,7 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 		case IMSG_VMDOP_PAUSE_VM:
 			vmr.vmr_result = 0;
 			vmr.vmr_id = vm->vm_params.vmc_params.vcp_id;
-			pause_vm();
+			pause_vm(&vm->vm_params.vmc_params);
 			log_info("paused vm: %d", vmr.vmr_id);
 			imsg_compose_event(&vm->vm_iev,
 				IMSG_VMDOP_PAUSE_VM_RESPONSE, imsg.hdr.peerid, imsg.hdr.pid,
@@ -430,9 +428,8 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 }
 
 void send_vm(int fd, struct vm_create_params *vcp) {
-	int i;
+	unsigned int i;
 	int ret;
-	char buf[PAGE_SIZE];
 	struct vm_mem_range *vmr;
 	struct vm_rwregs_params vrp;
 	struct vmop_create_params *vmc;
@@ -442,8 +439,7 @@ void send_vm(int fd, struct vm_create_params *vcp) {
 	memcpy(&vmc->vmc_params, vcp, sizeof(struct vm_create_params));
 	vmc->vmc_flags = flags;
 
-	pause_vm();
-	sleep(1);
+	pause_vm(vcp);
 
 	vrp.vrwp_vm_id = vcp->vcp_id;
 	vrp.vrwp_mask = -1;
@@ -469,7 +465,7 @@ void send_vm(int fd, struct vm_create_params *vcp) {
 
 	for (i = 0; i < vcp->vcp_nmemranges; i++) {
 		vmr = &vcp->vcp_memranges[i];
-		log_info("writing to fd %d\n", vmr->vmr_size);
+		log_info("writing to fd %zu\n", vmr->vmr_size);
 		mwrite(fd, vmr);
 	}
 	unpause_vm(vcp);
@@ -493,7 +489,7 @@ void mwrite(int fd, struct vm_mem_range *vmr) {
 		}
 		rem = rem - PAGE_SIZE;
 		if (rem < PAGE_SIZE *2) {
-			log_info("rem: %d", rem);
+			log_info("rem: %zu", rem);
 		}
 		read = read + PAGE_SIZE;
 	}
@@ -503,16 +499,41 @@ void mwrite(int fd, struct vm_mem_range *vmr) {
 
 }
 
-void pause_vm() {
+void pause_vm(struct vm_create_params *vcp) {
+	int ret;
 	if (paused == 0) {
+		ret = pthread_mutex_lock(&pause_mutex);
+
+		if (ret) {
+			log_warnx("%s: can't lock pause mutex",
+			   __func__);
+		}
+
+		paused_vcpus = 0;
 		paused = 1;
+		ret = pthread_cond_wait(&pause_cond,
+			    &pause_mutex);
+
+		if (ret) {
+			log_warnx("%s: can't wait on cond (%d)",
+			    __func__, (int)ret);
+		}
+
+
+		ret = pthread_mutex_unlock(&pause_mutex);
+
+		if (ret) {
+			log_warnx("%s: can't unlock pause mutex",
+			   __func__);
+		}
 
 	}
 }
+
 void unpause_vm(struct vm_create_params *vcp) {
 	if (paused) {
 		paused = 0;
-		int n;
+		unsigned int n;
 		for (n = 0; n <= vcp->vcp_ncpus; n++) {
 			pthread_cond_broadcast(&vcpu_run_cond[n]);
 		}
@@ -867,14 +888,8 @@ run_vm(int *child_disks, int *child_taps, struct vmop_create_params *vmc,
 		vregsp.vrwp_vm_id = vcp->vcp_id;
 		vregsp.vrwp_regs = *vrs;
 		log_info(" %d", vcp->vcp_id);
-		log_info("Here RAX: 0x%x", vregsp.vrwp_regs.vrs_gprs[VCPU_REGS_RAX]);
-		log_info("Here RIP: 0x%x", vregsp.vrwp_regs.vrs_gprs[VCPU_REGS_RIP]);
-
-		vregsp.vrwp_vcpu_id = i;
-		vregsp.vrwp_mask = -1;
-		if (ioctl(env->vmd_fd, VMM_IOC_WRITEREGS, &vregsp) < 0) {
-			log_info ("writeregs IOC error: %d, %d", errno, ENOENT);
-		}
+		log_info("Here RAX: 0x%llu", vregsp.vrwp_regs.vrs_gprs[VCPU_REGS_RAX]);
+		log_info("Here RIP: 0x%llu", vregsp.vrwp_regs.vrs_gprs[VCPU_REGS_RIP]);
 
 		ret = pthread_cond_init(&vcpu_run_cond[i], NULL);
 		if (ret) {
@@ -998,9 +1013,15 @@ vcpu_run_loop(void *arg)
 	intptr_t ret = 0;
 	int irq;
 	uint32_t n;
+	struct vm_create_params	*vcp = &current_vm->vm_params.vmc_params;
 
 	vrp->vrp_continue = 0;
 	n = vrp->vrp_vcpu_id;
+
+	struct vm_rwregs_params vmrp;
+	vmrp.vrwp_vm_id = vcp->vcp_id;	
+	vmrp.vrwp_mask = -1;
+
 	for (;;) {
 		ret = pthread_mutex_lock(&vcpu_run_mtx[n]);
 
@@ -1012,14 +1033,65 @@ vcpu_run_loop(void *arg)
 
 		/* If we are halted or paused, wait */
 		if (vcpu_hlt[n] || paused) {
-			ret = pthread_cond_wait(&vcpu_run_cond[n],
-			    &vcpu_run_mtx[n]);
+			if (paused) {
 
-			if (ret) {
-				log_warnx("%s: can't wait on cond (%d)",
-				    __func__, (int)ret);
-				(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
-				break;
+				ret = pthread_mutex_lock(&pause_mutex);
+
+				if (ret) {
+					log_warnx("%s: can't lock pause mutex",
+					   __func__);
+				}
+
+				paused_vcpus += 1;
+				ret = pthread_mutex_unlock(&pause_mutex);
+
+				if (ret) {
+					log_warnx("%s: can't unlock pause mutex",
+					   __func__);
+				}
+				if (paused_vcpus == vcp->vcp_ncpus){
+					pthread_cond_signal(&pause_cond);
+				}
+				while (paused) {
+					ret = pthread_cond_wait(&vcpu_run_cond[n],
+			    				&vcpu_run_mtx[n]);
+					if (ret) {
+						log_warnx("%s: can't wait on cond (%d)",
+				    		   __func__, (int)ret);
+						(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
+						break;
+					}
+
+				}
+	
+			}	
+			if (paused_vcpus > 0) {
+				ret = pthread_mutex_lock(&pause_mutex);
+
+				if (ret) {
+					log_warnx("%s: can't lock pause mutex",
+					   __func__);
+				}
+
+				paused_vcpus -= 1;
+
+				ret = pthread_mutex_unlock(&pause_mutex);
+
+				if (ret) {
+					log_warnx("%s: can't unlock pause mutex",
+					   __func__);
+				}
+			}
+			if (vcpu_hlt[n]) {
+				ret = pthread_cond_wait(&vcpu_run_cond[n],
+			    			&vcpu_run_mtx[n]);
+
+				if (ret) {
+					log_warnx("%s: can't wait on cond (%d)",
+				    	__func__, (int)ret);
+					(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
+					break;
+				}
 			}
 		}
 
@@ -1514,12 +1586,12 @@ void dump_regs(struct vcpu_reg_state *vrs) {
 	log_info("VCPU_REGS_CR3	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR3]);
 	log_info("VCPU_REGS_CR4	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR4]);
 	log_info("VCPU_REGS_CR8	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR8]);
-	log_info("VCPU_REGS_CS	   : vsi_base=0x%016llx vsi_limit=0x%016llx vsi_sel=0x%016llx ", vrs->vrs_sregs[VCPU_REGS_CS].vsi_base, vrs->vrs_sregs[VCPU_REGS_CS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_CS].vsi_sel);
-	log_info("VCPU_REGS_DS	   : vsi_base=0x%016llx vsi_limit=0x%016llx vsi_sel=0x%016llx ", vrs->vrs_sregs[VCPU_REGS_DS].vsi_base, vrs->vrs_sregs[VCPU_REGS_DS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_DS].vsi_sel);
-	log_info("VCPU_REGS_ES	   : vsi_base=0x%016llx vsi_limit=0x%016llx vsi_sel=0x%016llx ", vrs->vrs_sregs[VCPU_REGS_ES].vsi_base, vrs->vrs_sregs[VCPU_REGS_ES].vsi_limit, vrs->vrs_sregs[VCPU_REGS_ES].vsi_sel);
-	log_info("VCPU_REGS_FS	   : vsi_base=0x%016llx vsi_limit=0x%016llx vsi_sel=0x%016llx ", vrs->vrs_sregs[VCPU_REGS_FS].vsi_base, vrs->vrs_sregs[VCPU_REGS_FS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_FS].vsi_sel);
-	log_info("VCPU_REGS_GS	   : vsi_base=0x%016llx vsi_limit=0x%016llx vsi_sel=0x%016llx ", vrs->vrs_sregs[VCPU_REGS_GS].vsi_base, vrs->vrs_sregs[VCPU_REGS_GS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_GS].vsi_sel);
-	log_info("VCPU_REGS_SS	   : vsi_base=0x%016llx vsi_limit=0x%016llx vsi_sel=0x%016llx ", vrs->vrs_sregs[VCPU_REGS_SS].vsi_base, vrs->vrs_sregs[VCPU_REGS_SS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_SS].vsi_sel);
-	log_info("VCPU_REGS_LDTR   : vsi_base=0x%016llx vsi_limit=0x%016llx vsi_sel=0x%016llx ", vrs->vrs_gdtr.vsi_base, vrs->vrs_gdtr.vsi_limit, vrs->vrs_gdtr.vsi_sel);
-	log_info("VCPU_REGS_IDTR   : vsi_base=0x%016llx vsi_limit=0x%016llx vsi_sel=0x%016llx ", vrs->vrs_idtr.vsi_base, vrs->vrs_idtr.vsi_limit, vrs->vrs_idtr.vsi_sel);
+	log_info("VCPU_REGS_CS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_CS].vsi_base, vrs->vrs_sregs[VCPU_REGS_CS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_CS].vsi_sel);
+	log_info("VCPU_REGS_DS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_DS].vsi_base, vrs->vrs_sregs[VCPU_REGS_DS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_DS].vsi_sel);
+	log_info("VCPU_REGS_ES	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_ES].vsi_base, vrs->vrs_sregs[VCPU_REGS_ES].vsi_limit, vrs->vrs_sregs[VCPU_REGS_ES].vsi_sel);
+	log_info("VCPU_REGS_FS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_FS].vsi_base, vrs->vrs_sregs[VCPU_REGS_FS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_FS].vsi_sel);
+	log_info("VCPU_REGS_GS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_GS].vsi_base, vrs->vrs_sregs[VCPU_REGS_GS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_GS].vsi_sel);
+	log_info("VCPU_REGS_SS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_SS].vsi_base, vrs->vrs_sregs[VCPU_REGS_SS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_SS].vsi_sel);
+	log_info("VCPU_REGS_LDTR   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_gdtr.vsi_base, vrs->vrs_gdtr.vsi_limit, vrs->vrs_gdtr.vsi_sel);
+	log_info("VCPU_REGS_IDTR   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_idtr.vsi_base, vrs->vrs_idtr.vsi_limit, vrs->vrs_idtr.vsi_sel);
 }
