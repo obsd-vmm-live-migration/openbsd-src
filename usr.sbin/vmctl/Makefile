@@ -9,6 +9,7 @@ CFLAGS+= -Wstrict-prototypes -Wmissing-prototypes
 CFLAGS+= -Wmissing-declarations
 CFLAGS+= -Wshadow -Wpointer-arith -Wcast-qual
 CFLAGS+= -Wsign-compare
+CFLAGS+= -g
 CFLAGS+= -I${.CURDIR} -I${.CURDIR}/../vmd
 LDADD+=	-lutil
 DPADD+= ${LIBUTIL}
