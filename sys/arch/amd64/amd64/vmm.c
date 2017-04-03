@@ -40,10 +40,10 @@
 
 #include <dev/isa/isareg.h>
 
-/* #define VMM_DEBUG */
+#define VMM_DEBUG
 
 #ifdef VMM_DEBUG
-int vmm_debug = 0;
+int vmm_debug = 1;
 #define DPRINTF(x...)	do { if (vmm_debug) printf(x); } while(0)
 #else
 #define DPRINTF(x...)
@@ -3383,6 +3383,8 @@ vcpu_run_vmx(struct vcpu *vcpu, struct vm_run_params *vrp)
 
 	resume = 0;
 	irq = vrp->vrp_irq;
+	DPRINTF("Entering...");
+	vmx_vcpu_dump_regs(vcpu);
 
 	/*
 	 * If we are returning from userspace (vmd) because we exited

@@ -56,6 +56,10 @@ int		 ctl_reset(struct parse_result *, int, char *[]);
 int		 ctl_start(struct parse_result *, int, char *[]);
 int		 ctl_status(struct parse_result *, int, char *[]);
 int		 ctl_stop(struct parse_result *, int, char *[]);
+int		 ctl_pause(struct parse_result *, int, char *[]);
+int		 ctl_unpause(struct parse_result *, int, char *[]);
+int		 ctl_send(struct parse_result *, int, char *[]);
+int		 ctl_receive(struct parse_result *, int, char *[]);
 
 struct ctl_command ctl_commands[] = {
 	{ "console",	CMD_CONSOLE,	ctl_console,	"id" },
@@ -69,6 +73,10 @@ struct ctl_command ctl_commands[] = {
 	    "\t\t[-n switch] [-i count] [-d disk]*" },
 	{ "status",	CMD_STATUS,	ctl_status,	"[id]" },
 	{ "stop",	CMD_STOP,	ctl_stop,	"id" },
+	{ "pause",	CMD_PAUSE,	ctl_pause,	"id" },
+	{ "unpause",	CMD_UNPAUSE,	ctl_unpause,	"id" },
+	{ "send",	CMD_SEND,	ctl_send,	"id" },
+	{ "receive",	CMD_RECEIVE,	ctl_receive,	"id" },
 	{ NULL }
 };
 
@@ -151,7 +159,7 @@ parse(int argc, char *argv[])
 
 	if (!ctl->has_pledge) {
 		/* pledge(2) default if command doesn't have its own pledge */
-		if (pledge("stdio rpath exec unix getpw", NULL) == -1)
+		if (pledge("stdio rpath exec unix getpw sendfd", NULL) == -1)
 			err(1, "pledge");
 	}
 	if (ctl->main(&res, argc, argv) != 0)
@@ -230,6 +238,20 @@ vmmaction(struct parse_result *res)
 		done = 1;
 		break;
 	case CMD_CREATE:
+	case CMD_PAUSE:
+		pause_vm(res->id, res->name);
+		break;
+	case CMD_UNPAUSE:
+		unpause_vm(res->id, res->name);
+		break;
+	case CMD_SEND:
+		send_vm(res->id, res->name);
+		done = 1;
+		break;
+	case CMD_RECEIVE:
+		recv_vm(res->id, res->name);
+		done = 1;
+		break;
 	case NONE:
 		break;
 	}
@@ -277,6 +299,12 @@ vmmaction(struct parse_result *res)
 			case CMD_CONSOLE:
 			case CMD_STATUS:
 				done = add_info(&imsg, &ret);
+				break;
+			case CMD_PAUSE:
+				done = pause_vm_complete(&imsg, &ret);
+				break;
+			case CMD_UNPAUSE:
+				done = unpause_vm_complete(&imsg, &ret);
 				break;
 			default:
 				done = 1;
@@ -615,6 +643,54 @@ ctl_console(struct parse_result *res, int argc, char *argv[])
 	return (vmmaction(res));
 }
 
+int
+ctl_pause(struct parse_result *res, int argc, char *argv[])
+{
+	if (argc == 2) {
+		if (parse_vmid(res, argv[1]) == -1)
+			errx(1, "invalid id: %s", argv[1]);
+	} else if (argc != 2)
+		ctl_usage(res->ctl);
+
+	return (vmmaction(res));
+}
+
+int
+ctl_unpause(struct parse_result *res, int argc, char *argv[])
+{
+	if (argc == 2) {
+		if (parse_vmid(res, argv[1]) == -1)
+			errx(1, "invalid id: %s", argv[1]);
+	} else if (argc != 2)
+		ctl_usage(res->ctl);
+
+	return (vmmaction(res));
+}
+
+int
+ctl_send(struct parse_result *res, int argc, char *argv[])
+{
+	if (argc == 2) {
+		if (parse_vmid(res, argv[1]) == -1)
+			errx(1, "invalid id: %s", argv[1]);
+	} else if (argc != 2)
+		ctl_usage(res->ctl);
+
+	return (vmmaction(res));
+}
+
+int
+ctl_receive(struct parse_result *res, int argc, char *argv[])
+{
+	if (argc == 2) {
+		if (parse_vmid(res, argv[1]) == -1)
+			errx(1, "invalid id: %s", argv[1]);
+	} else if (argc != 2)
+		ctl_usage(res->ctl);
+
+	return (vmmaction(res));
+}
+
 __dead void
 ctl_openconsole(const char *name)
 {
@@ -622,3 +698,4 @@ ctl_openconsole(const char *name)
 	execl(VMCTL_CU, VMCTL_CU, "-l", name, "-s", "9600", (char *)NULL);
 	err(1, "failed to open the console");
 }
+
