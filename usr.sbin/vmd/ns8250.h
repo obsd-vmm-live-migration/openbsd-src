@@ -62,3 +62,5 @@ void vcpu_process_com_mcr(union vm_exit *);
 void vcpu_process_com_iir(union vm_exit *);
 void vcpu_process_com_msr(union vm_exit *);
 void vcpu_process_com_scr(union vm_exit *);
+void ns8250_dump(int fd);
+void ns8250_restore(int fd);

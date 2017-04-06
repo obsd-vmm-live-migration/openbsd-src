@@ -443,11 +443,13 @@ config_set_receivedvm(struct privsep *ps, struct vmd_vm *vm, uint32_t peerid, ui
 
 	/* Open TTY */
 	if (vm->vm_ttyname == NULL) {
+		log_info("it's null, jim");
 		if (vm_opentty(vm) == -1) {
 			log_warn("%s: can't open tty %s", __func__,
 			    vm->vm_ttyname == NULL ? "" : vm->vm_ttyname);
 			goto fail;
 		}
+		log_info("and now, it's %s", vm->vm_ttyname);
 	}
 	if ((fd = dup(vm->vm_tty)) == -1) {
 		log_warn("%s: can't re-open tty %s", __func__, vm->vm_ttyname);

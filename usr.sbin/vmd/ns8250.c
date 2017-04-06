@@ -484,3 +484,30 @@ vcpu_exit_com(struct vm_run_params *vrp)
 	mutex_unlock(&com1_dev.mutex);
 	return (intr);
 }
+
+void
+ns8250_dump(int fd) {
+	int ret;
+	ret = write(fd, &com1_dev.regs, sizeof(com1_dev.regs));
+	log_info("dump 8250 %d", ret);
+	ret = write(fd, &com1_dev.rcv_pending, sizeof(com1_dev.rcv_pending));
+	log_info("dump 8250 %d", ret);
+}
+
+
+void
+ns8250_restore(int fd) {
+	int ret;
+	/* char buf[4097]; */
+	/* int a; */
+	/* ret = read(fd, &buf, sizeof(com1_dev.regs)); */
+	/* log_info("restore 8250 %d", ret); */
+	/* ret = read(fd, &buf, sizeof(com1_dev.rcv_pending)); */
+	/* log_info("restore 8250 %d", ret); */
+	/* return; */
+	ret = read(fd, &com1_dev.regs, sizeof(com1_dev.regs));
+	log_info("restore 8250 %d", ret);
+	ret = read(fd, &com1_dev.rcv_pending, sizeof(com1_dev.rcv_pending));
+	/* ret = read(fd, &a, sizeof(com1_dev.rcv_pending)); */
+	log_info("restore 8250 %d", ret);
+}
