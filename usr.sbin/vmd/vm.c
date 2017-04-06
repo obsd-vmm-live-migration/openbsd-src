@@ -609,33 +609,10 @@ void mwrite(int fd, struct vm_mem_range *vmr) {
 }
 
 void pause_vm(struct vm_create_params *vcp) {
-	int ret;
 	if (paused == 0) {
-		ret = pthread_mutex_lock(&pause_mutex);
-
-		if (ret) {
-			log_warnx("%s: can't lock pause mutex",
-			   __func__);
-		}
-
 		paused_vcpus = 0;
 		paused = 1;
-		ret = pthread_cond_wait(&pause_cond,
-			    &pause_mutex);
-
-		if (ret) {
-			log_warnx("%s: can't wait on cond (%d)",
-			    __func__, (int)ret);
-		}
-
-
-		ret = pthread_mutex_unlock(&pause_mutex);
-
-		if (ret) {
-			log_warnx("%s: can't unlock pause mutex",
-			   __func__);
-		}
-
+		return;
 	}
 }
 
@@ -1157,26 +1134,9 @@ vcpu_run_loop(void *arg)
 		}
 
 		/* If we are halted or paused, wait */
-		if (vcpu_hlt[n] || paused) {
-			if (paused) {
-
-				ret = pthread_mutex_lock(&pause_mutex);
-
-				if (ret) {
-					log_warnx("%s: can't lock pause mutex",
-					   __func__);
-				}
-
+		if (vcpu_hlt[n]) {
+			if (paused == 1) {
 				paused_vcpus += 1;
-				ret = pthread_mutex_unlock(&pause_mutex);
-
-				if (ret) {
-					log_warnx("%s: can't unlock pause mutex",
-					   __func__);
-				}
-				if (paused_vcpus == vcp->vcp_ncpus){
-					pthread_cond_signal(&pause_cond);
-				}
 				while (paused) {
 					ret = pthread_cond_wait(&vcpu_run_cond[n],
 			    				&vcpu_run_mtx[n]);
@@ -1186,26 +1146,10 @@ vcpu_run_loop(void *arg)
 						(void)pthread_mutex_unlock(&vcpu_run_mtx[n]);
 						break;
 					}
-
-				}
-	
+				}	
 			}	
 			if (paused_vcpus > 0) {
-				ret = pthread_mutex_lock(&pause_mutex);
-
-				if (ret) {
-					log_warnx("%s: can't lock pause mutex",
-					   __func__);
-				}
-
 				paused_vcpus -= 1;
-
-				ret = pthread_mutex_unlock(&pause_mutex);
-
-				if (ret) {
-					log_warnx("%s: can't unlock pause mutex",
-					   __func__);
-				}
 			}
 			if (vcpu_hlt[n]) {
 				ret = pthread_cond_wait(&vcpu_run_cond[n],
