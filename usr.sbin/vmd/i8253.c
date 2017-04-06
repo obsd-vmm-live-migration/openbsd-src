@@ -25,12 +25,14 @@
 #include <event.h>
 #include <string.h>
 #include <stddef.h>
+#include <unistd.h>
 
 #include "i8253.h"
 #include "proc.h"
 #include "vmm.h"
 
 extern char *__progname;
+uint32_t vmid;
 
 /*
  * Counter 0 is used to generate the legacy hardclock interrupt (HZ).
@@ -51,6 +53,7 @@ void
 i8253_init(uint32_t vm_id)
 {
 	memset(&i8253_counter, 0, sizeof(struct i8253_counter));
+	vmid = vm_id;
 	gettimeofday(&i8253_counter[0].tv, NULL);
 	i8253_counter[0].start = 0xFFFF;
 	i8253_counter[0].mode = TIMER_INTTC;
@@ -335,6 +338,8 @@ i8253_fire(int fd, short type, void *arg)
 	struct timeval tv;
 	struct i8253_counter *ctr = (struct i8253_counter *)arg;
 
+	/* log_info("fired"); */
+
 	timerclear(&tv);
 	tv.tv_usec = (ctr->start * NS_PER_TICK) / 1000;
 
@@ -343,3 +348,30 @@ i8253_fire(int fd, short type, void *arg)
 	if (ctr->mode != TIMER_INTTC)
 		evtimer_add(&ctr->timer, &tv);
 }
+
+void
+i8253_dump(int fd) {
+	int ret;
+	ret = write(fd, &i8253_counter, sizeof(i8253_counter));
+	log_info("dump 8253 %d", ret);
+}
+
+
+void
+i8253_restore(int fd) {
+	int ret;
+	/* char buf[4096]; */
+	/* ret = read(fd, &buf, sizeof(i8253_counter)); */
+	/* return; */
+	evtimer_del(&i8253_counter[0].timer);
+	ret = read(fd, &i8253_counter, sizeof(i8253_counter));
+	log_info("restore 8253 %d", ret);
+	i8253_counter[0].start = 0xFFFF;
+	i8253_counter[0].mode = TIMER_RATEGEN;
+	/* gettimeofday(&i8253_counter[0].tv, NULL); */
+	memset(&i8253_counter[0].timer, 0, sizeof(struct event));
+	evtimer_set(&i8253_counter[0].timer, i8253_fire,
+	    (void *)(intptr_t)vmid);
+	i8253_reset(0);
+}
+

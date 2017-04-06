@@ -2066,7 +2066,7 @@ vcpu_reset_regs_vmx(struct vcpu *vcpu, struct vcpu_reg_state *vrs)
 		if (vcpu_vmx_check_cap(vcpu, IA32_VMX_PROCBASED2_CTLS,
 		    IA32_VMX_UNRESTRICTED_GUEST, 1)) {
 			want1 |= IA32_VMX_UNRESTRICTED_GUEST;
-			ug = 1;
+			ug = 0;
 		}
 	}
 
@@ -2284,16 +2284,17 @@ vcpu_reset_regs_vmx(struct vcpu *vcpu, struct vcpu_reg_state *vrs)
 	else
 		msr_store[0].vms_data = EFER_LME;
 
+	msr_store[0].vms_data = rdmsr(MSR_EFER);
 	msr_store[1].vms_index = MSR_STAR;
-	msr_store[1].vms_data = 0ULL;		/* Initial value */
+	msr_store[1].vms_data = rdmsr(MSR_STAR);		/* Initial value */
 	msr_store[2].vms_index = MSR_LSTAR;
-	msr_store[2].vms_data = 0ULL;		/* Initial value */
+	msr_store[2].vms_data = rdmsr(MSR_LSTAR);		/* Initial value */
 	msr_store[3].vms_index = MSR_CSTAR;
-	msr_store[3].vms_data = 0ULL;		/* Initial value */
+	msr_store[3].vms_data = rdmsr(MSR_CSTAR);		/* Initial value */
 	msr_store[4].vms_index = MSR_SFMASK;
-	msr_store[4].vms_data = 0ULL;		/* Initial value */
+	msr_store[4].vms_data = rdmsr(MSR_SFMASK);		/* Initial value */
 	msr_store[5].vms_index = MSR_KERNELGSBASE;
-	msr_store[5].vms_data = 0ULL;		/* Initial value */
+	msr_store[5].vms_data = rdmsr(MSR_KERNELGSBASE);		/* Initial value */
 
 	/*
 	 * Currently we have the same count of entry/exit MSRs loads/stores
@@ -3383,8 +3384,6 @@ vcpu_run_vmx(struct vcpu *vcpu, struct vm_run_params *vrp)
 
 	resume = 0;
 	irq = vrp->vrp_irq;
-	DPRINTF("Entering...");
-	vmx_vcpu_dump_regs(vcpu);
 
 	/*
 	 * If we are returning from userspace (vmd) because we exited
