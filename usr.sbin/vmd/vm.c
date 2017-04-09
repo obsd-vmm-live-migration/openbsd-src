@@ -576,6 +576,7 @@ void send_vm(int fd, struct vm_create_params *vcp) {
    i8259_dump(fd);
    ns8250_dump(fd);
    mc146818_dump(fd);
+   pci_dump(fd);
 
 	dump_regs(&vrp.vrwp_regs);
 
@@ -905,17 +906,6 @@ restore_emulated_hw(struct vm_create_params *vcp, FILE *fp)
 {
 	/* struct vm_create_params *vcp = &vmc->vmc_params; */
 	int i;
-	uint64_t memlo, memhi;
-
-	/* Calculate memory size for NVRAM registers */
-	memlo = memhi = 0;
-	if (vcp->vcp_nmemranges > 2)
-		memlo = vcp->vcp_memranges[2].vmr_size - 15 * 0x100000;
-
-	if (vcp->vcp_nmemranges > 3)
-		memhi = vcp->vcp_memranges[3].vmr_size;
-
-	/* Reset the IO port map */
 	memset(&ioports_map, 0, sizeof(io_fn_t) * MAX_PORTS);
 
 	/* Init i8253 PIT */
@@ -939,7 +929,6 @@ restore_emulated_hw(struct vm_create_params *vcp, FILE *fp)
 
 	/* Init mc146818 RTC */
 	mc146818_restore(fp, vcp->vcp_id);
-	mc146818_init(vcp->vcp_id, memlo, memhi);
 	ioports_map[IO_RTC] = vcpu_exit_mc146818;
 	ioports_map[IO_RTC + 1] = vcpu_exit_mc146818;
 
