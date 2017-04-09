@@ -27,6 +27,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdio.h>
 
 #include "mc146818.h"
 #include "proc.h"
@@ -61,6 +62,7 @@ struct mc146818 {
 struct mc146818 rtc;
 uint32_t vmid;
 
+int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
 /*
  * rtc_updateregs
  *
@@ -116,7 +118,7 @@ rtc_fire1(int fd, short type, void *arg)
 static void
 rtc_fireper(int fd, short type, void *arg)
 {
-	/* log_info("fire rtc"); */
+	log_info("fire rtc per");
 	rtc.regs[MC_REGC] |= MC_REGC_PF;
 
 	vcpu_assert_pic_irq((ptrdiff_t)arg, 0, 8);
@@ -316,22 +318,26 @@ mc146818_dump(int fd) {
 }
 
 void
-mc146818_restore(int fd) {
+mc146818_restore(FILE *fp, uint32_t vm_id) {
 	int ret;
-	/* char buf[4096]; */
+	char buf[2048];
+	ret = fread(&rtc,1, sizeof(rtc), fp);
 	/* ret = read(fd, &buf, sizeof(rtc)); */
-	/* return; */
-	evtimer_del(&rtc.sec);
-	evtimer_del(&rtc.per);
-	log_info("cleared old");
-	ret = read(fd, &rtc, sizeof(rtc));
 	log_info("restore rtc %d", ret);
-	rtc.vm_id = vmid;
-	/* rtc_reschedule_per(); */
-	log_info("reschedule");
-	evtimer_set(&rtc.per, rtc_fireper, (void *)(intptr_t)rtc.vm_id);
-	evtimer_set(&rtc.sec, rtc_fire1, NULL);
-	evtimer_add(&rtc.sec, &rtc.sec_tv);
-	evtimer_add(&rtc.per, &rtc.per_tv);
+	rtc.vm_id = vm_id;
+	time(&rtc.now);
 
+	memset(&rtc.sec, 0, sizeof(struct event));
+	memset(&rtc.per, 0, sizeof(struct event));
+	evtimer_set(&rtc.sec, rtc_fire1, NULL);
+	evtimer_set(&rtc.per, rtc_fireper, (void *)(intptr_t)rtc.vm_id);
+}
+
+mc146818_restore_end(uint32_t vm_id) {
+	rtc.now++;
+	rtc_updateregs();
+	evtimer_add(&rtc.sec, &rtc.sec_tv);
+	rtc.regs[MC_REGC] |= MC_REGC_PF;
+	vcpu_pic_intr(vm_id, 0, 8);
+	evtimer_add(&rtc.per, &rtc.per_tv);
 }

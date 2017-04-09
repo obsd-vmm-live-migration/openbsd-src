@@ -22,6 +22,7 @@
 #include <machine/vmmvar.h>
 
 #include <errno.h>
+#include <stdio.h>
 #include <event.h>
 #include <pthread.h>
 #include <string.h>
@@ -61,6 +62,7 @@ ns8250_init(int fd, uint32_t vmid)
 static void
 com_rcv_event(int fd, short kind, void *arg)
 {
+	/* log_info("com rcv event"); */
 	mutex_lock(&com1_dev.mutex);
 
 	/*
@@ -491,23 +493,41 @@ ns8250_dump(int fd) {
 	ret = write(fd, &com1_dev.regs, sizeof(com1_dev.regs));
 	log_info("dump 8250 %d", ret);
 	ret = write(fd, &com1_dev.rcv_pending, sizeof(com1_dev.rcv_pending));
-	log_info("dump 8250 %d", ret);
+	log_info("dump 8250 %d, %d", ret, &com1_dev.rcv_pending);
 }
 
 
 void
-ns8250_restore(int fd) {
+ns8250_restore(FILE *fp, int con_fd, uint32_t vmid) {
 	int ret;
-	/* char buf[4097]; */
+	char buf[4097];
 	/* int a; */
 	/* ret = read(fd, &buf, sizeof(com1_dev.regs)); */
 	/* log_info("restore 8250 %d", ret); */
 	/* ret = read(fd, &buf, sizeof(com1_dev.rcv_pending)); */
 	/* log_info("restore 8250 %d", ret); */
 	/* return; */
-	ret = read(fd, &com1_dev.regs, sizeof(com1_dev.regs));
+	ns8250_init(con_fd, vmid);
+	/* ret = fread(&buf, 1, sizeof(com1_dev.regs), fp); */
+	/* log_info("restore 8250 %d", ret); */
+	/* ret = fread(&buf, 1, sizeof(com1_dev.rcv_pending), fp); */
+	/* log_info("restore 8250 %d, %d", ret, com1_dev.rcv_pending); */
+
+	/* log_info("restoring 8250..."); */
+	ret = fread(&com1_dev.regs, 1, sizeof(com1_dev.regs), fp);
 	log_info("restore 8250 %d", ret);
-	ret = read(fd, &com1_dev.rcv_pending, sizeof(com1_dev.rcv_pending));
-	/* ret = read(fd, &a, sizeof(com1_dev.rcv_pending)); */
-	log_info("restore 8250 %d", ret);
+	ret = fread(&com1_dev.rcv_pending, 1, sizeof(com1_dev.rcv_pending), fp);
+	log_info("restore 8250 %d, %d", ret, com1_dev.rcv_pending);
+
+
+	/* ret = pthread_mutex_init(&com1_dev.mutex, NULL); */
+	/* if (ret) { */
+	/* 	errno = ret; */
+	/* 	fatal("could not initialize com1 mutex"); */
+	/* } */
+	/* com1_dev.fd = con_fd; */
+    /*  */
+	/* event_set(&com1_dev.event, com1_dev.fd, EV_READ | EV_PERSIST, */
+	/*     com_rcv_event, (void *)(intptr_t)vmid); */
+	/* event_add(&com1_dev.event, NULL); */
 }
