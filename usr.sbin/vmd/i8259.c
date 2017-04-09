@@ -24,6 +24,7 @@
 #include <machine/vmmvar.h>
 
 #include <unistd.h>
+#include <stdio.h>
 #include "proc.h"
 #include "i8259.h"
 #include "vmm.h"
@@ -658,12 +659,12 @@ i8259_dump(int fd) {
 
 
 void
-i8259_restore(int fd) {
+i8259_restore(FILE *fp) {
 	int ret;
 	/* char buf[4096]; */
 	/* ret = read(fd, &buf, sizeof(pics)); */
 	/* return; */
-	ret = read(fd, &pics, sizeof(pics));
+	ret = fread(&pics, 1,  sizeof(pics), fp);
 	log_info("restore pic %d", ret);
 }
 
