@@ -364,42 +364,9 @@ i8253_dump(int fd) {
 void
 i8253_restore(FILE *fp, uint32_t vm_id) {
 	int ret;
-	/* char buf[2048]; */
-/* 	ret = read(fd, &buf, sizeof(i8253_counter)); */
-/* return; */
-	struct timeval tv;
-	log_info("restoring 8253..");
 	ret = fread(&i8253_counter, 1, sizeof(i8253_counter), fp);
 	log_info("restore 8253 %d", ret);
 	memset(&i8253_counter[0].timer, 0, sizeof(struct event));
-	gettimeofday(&i8253_counter[0].tv, NULL);
 	evtimer_set(&i8253_counter[0].timer, i8253_fire,
 	    (void *)(intptr_t)vm_id);
-	/* evtimer_add(&i8253_counter[0].timer, &tv); */
-	/* i8253_reset(0); */
-	/* timerclear(&tv); */
-    /*  */
-	/* tv.tv_usec = (i8253_counter[0].start * NS_PER_TICK) / 1000; */
-    /*  */
-	/*  if (i8253_counter[0].mode != TIMER_INTTC) */
-	/* 	evtimer_add(&i8253_counter[0].timer, &tv); */
-	i8253_fire(0, 0, vm_id);
 }
-
-<<<<<<< HEAD
-=======
-void
-i8253_restore_end(uint32_t vm_id)
-{
-	struct timeval tv;
-
-
-	timerclear(&tv);
-	tv.tv_usec = (i8253_counter[0].start * NS_PER_TICK) / 1000;
-
-	i8259_assert_irq(0);
-	vcpu_pic_intr(vm_id, 0, 1);
-
-		/* evtimer_add(&i8253_counter[0].timer, &tv); */
-}
->>>>>>> before refactoring

@@ -97,9 +97,10 @@ rtc_updateregs(void)
  *  type: unused
  *  arg: unused
  */
-static void
+void
 rtc_fire1(int fd, short type, void *arg)
 {
+	/* log_info("fire1 rtc"); */
 	rtc.now++;
 	rtc_updateregs();
 	evtimer_add(&rtc.sec, &rtc.sec_tv);
@@ -115,7 +116,7 @@ rtc_fire1(int fd, short type, void *arg)
  *  type: unused
  *  arg: (as uint32_t), VM ID to which this RTC belongs
  */
-static void
+void
 rtc_fireper(int fd, short type, void *arg)
 {
 	/* log_info("fire rtc per"); */
@@ -320,24 +321,15 @@ mc146818_dump(int fd) {
 void
 mc146818_restore(FILE *fp, uint32_t vm_id) {
 	int ret;
-	char buf[2048];
 	ret = fread(&rtc,1, sizeof(rtc), fp);
-	/* ret = read(fd, &buf, sizeof(rtc)); */
 	log_info("restore rtc %d", ret);
 	rtc.vm_id = vm_id;
-	time(&rtc.now);
 
 	memset(&rtc.sec, 0, sizeof(struct event));
 	memset(&rtc.per, 0, sizeof(struct event));
 	evtimer_set(&rtc.sec, rtc_fire1, NULL);
 	evtimer_set(&rtc.per, rtc_fireper, (void *)(intptr_t)rtc.vm_id);
-}
 
-mc146818_restore_end(uint32_t vm_id) {
-	rtc.now++;
-	rtc_updateregs();
-	evtimer_add(&rtc.sec, &rtc.sec_tv);
-	rtc.regs[MC_REGC] |= MC_REGC_PF;
-	vcpu_pic_intr(vm_id, 0, 8);
 	evtimer_add(&rtc.per, &rtc.per_tv);
+	evtimer_add(&rtc.sec, &rtc.sec_tv);
 }
