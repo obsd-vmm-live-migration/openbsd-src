@@ -24,6 +24,7 @@
 #include <machine/vmmvar.h>
 
 #include <string.h>
+#include <unistd.h>
 #include "vmd.h"
 #include "pci.h"
 #include "vmm.h"
@@ -380,4 +381,20 @@ pci_handle_data_reg(struct vm_run_params *vrp)
 			}
 		}
 	}
+}
+
+void
+pci_dump(int fd) {
+	int ret;
+	ret = write(fd, &pci, sizeof(pci));
+	log_info("dump pci %d", ret);
+}
+
+
+void
+pci_restore(FILE *fp) {
+	int ret;
+	log_info("pci size %d", sizeof(pci));
+	ret = fread(&pci, 1, sizeof(pci), fp);
+	log_info("restore pci %d", ret);
 }
