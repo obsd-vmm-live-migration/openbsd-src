@@ -118,7 +118,7 @@ rtc_fire1(int fd, short type, void *arg)
 static void
 rtc_fireper(int fd, short type, void *arg)
 {
-	log_info("fire rtc per");
+	/* log_info("fire rtc per"); */
 	rtc.regs[MC_REGC] |= MC_REGC_PF;
 
 	vcpu_assert_pic_irq((ptrdiff_t)arg, 0, 8);
