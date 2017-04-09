@@ -26,13 +26,17 @@
 #include <string.h>
 #include <stddef.h>
 #include <unistd.h>
+#include <stdio.h>
 
 #include "i8253.h"
+#include "i8259.h"
 #include "proc.h"
+#include "vmm.h"
 #include "vmm.h"
 
 extern char *__progname;
 uint32_t vmid;
+int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
 
 /*
  * Counter 0 is used to generate the legacy hardclock interrupt (HZ).
@@ -273,6 +277,7 @@ i8253_reset(uint8_t chn)
 
 	tv.tv_usec = (i8253_counter[chn].start * NS_PER_TICK) / 1000;
 	evtimer_add(&i8253_counter[chn].timer, &tv);
+	log_info("8253 reset complete");
 }
 
 /*
@@ -291,7 +296,6 @@ i8253_fire(int fd, short type, void *arg)
 {
 	struct timeval tv;
 
-	/* log_info("fired"); */
 
 	timerclear(&tv);
 	tv.tv_usec = (i8253_counter[0].start * NS_PER_TICK) / 1000;
@@ -300,6 +304,7 @@ i8253_fire(int fd, short type, void *arg)
 
 	if (i8253_counter[0].mode != TIMER_INTTC)
 		evtimer_add(&i8253_counter[0].timer, &tv);
+}
 
 void
 i8253_dump(int fd) {
@@ -310,21 +315,41 @@ i8253_dump(int fd) {
 
 
 void
-i8253_restore(int fd) {
+i8253_restore(FILE *fp, uint32_t vm_id) {
 	int ret;
-	/* char buf[4096]; */
-	/* ret = read(fd, &buf, sizeof(i8253_counter)); */
-	/* return; */
-	evtimer_del(&i8253_counter[0].timer);
-	ret = read(fd, &i8253_counter, sizeof(i8253_counter));
+	/* char buf[2048]; */
+/* 	ret = read(fd, &buf, sizeof(i8253_counter)); */
+/* return; */
+	struct timeval tv;
+	log_info("restoring 8253..");
+	ret = fread(&i8253_counter, 1, sizeof(i8253_counter), fp);
 	log_info("restore 8253 %d", ret);
-	i8253_counter[0].start = 0xFFFF;
-	i8253_counter[0].mode = TIMER_RATEGEN;
-	/* gettimeofday(&i8253_counter[0].tv, NULL); */
 	memset(&i8253_counter[0].timer, 0, sizeof(struct event));
+	gettimeofday(&i8253_counter[0].tv, NULL);
 	evtimer_set(&i8253_counter[0].timer, i8253_fire,
-	    (void *)(intptr_t)vmid);
-	i8253_reset(0);
+	    (void *)(intptr_t)vm_id);
+	/* evtimer_add(&i8253_counter[0].timer, &tv); */
+	/* i8253_reset(0); */
+	/* timerclear(&tv); */
+    /*  */
+	/* tv.tv_usec = (i8253_counter[0].start * NS_PER_TICK) / 1000; */
+    /*  */
+	/*  if (i8253_counter[0].mode != TIMER_INTTC) */
+	/* 	evtimer_add(&i8253_counter[0].timer, &tv); */
+	i8253_fire(0, 0, vm_id);
 }
 
+void
+i8253_restore_end(uint32_t vm_id)
+{
+	struct timeval tv;
+
+
+	timerclear(&tv);
+	tv.tv_usec = (i8253_counter[0].start * NS_PER_TICK) / 1000;
+
+	i8259_assert_irq(0);
+	vcpu_pic_intr(vm_id, 0, 1);
+
+		/* evtimer_add(&i8253_counter[0].timer, &tv); */
 }

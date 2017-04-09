@@ -73,6 +73,7 @@ void create_memory_map(struct vm_create_params *);
 int alloc_guest_mem(struct vm_create_params *);
 int vmm_create_vm(struct vm_create_params *);
 void init_emulated_hw(struct vmop_create_params *, int *, int *);
+void restore_emulated_hw(struct vm_create_params *, FILE *fp);
 void vcpu_exit_inout(struct vm_run_params *);
 uint8_t vcpu_exit_pci(struct vm_run_params *);
 int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
@@ -83,6 +84,7 @@ void pause_vm(struct vm_create_params *);
 void unpause_vm(struct vm_create_params *);
 void dump_regs(struct vcpu_reg_state *);
 
+int hardware_initialized=0;
 
 static struct vm_mem_range *find_gpa_range(struct vm_create_params *, paddr_t,
     size_t);
@@ -282,7 +284,7 @@ start_vm(struct vmd_vm *vm, int fd)
 	 * recvfd - for send/recv.
 	 * vmm - for the vmm ioctls and operations.
 	 */
-	if (pledge("stdio vmm recvfd", NULL) == -1)
+	if (pledge("stdio vmm recvfd cpath wpath flock", NULL) == -1)
 		fatal("pledge");
 
 	/*
@@ -370,13 +372,6 @@ receive_vm(struct vmd_vm *vm, int recv_fd, int fd) {
 		fatal("could not allocate guest memory - exiting");
 	}
 
-	recvfp = fdopen(recv_fd, "r");
-	for (i = 0; i < vcp->vcp_nmemranges; i++) {
-		vmr = &vcp->vcp_memranges[i];
-		log_info("reading from fd %zu\n", vmr->vmr_size);
-		mread(recvfp, vmr->vmr_gpa, vmr->vmr_size);
-	}
-
 	/* log_info(">>>>vcp id: %d", vcp->vcp_id); */
 	/* while(read(recv_fd, buf, PAGE_SIZE) != 0 ) { */
 	/* 	log_info("overflow!"); */
@@ -405,12 +400,21 @@ receive_vm(struct vmd_vm *vm, int recv_fd, int fd) {
 
 	event_init();
 
+	recvfp = fdopen(recv_fd, "r");
+
+	restore_emulated_hw(vcp, recvfp);
+
+	for (i = 0; i < vcp->vcp_nmemranges; i++) {
+		vmr = &vcp->vcp_memranges[i];
+		log_info("reading from fd %zu\n", vmr->vmr_size);
+		mread(recvfp, vmr->vmr_gpa, vmr->vmr_size);
+	}
+
 	if (vmm_pipe(vm, fd, vm_dispatch_vmm) == -1)
 		fatal("setup vm pipe");
 
 	log_info("Should run now");
 	/* Execute the vcpu run loop(s) for this VM */
-	/* pause_vm(); */
 	ret = run_vm(vm->vm_disks, nicfds, &vm->vm_params, &vrs);
 
 	return (ret);
@@ -547,7 +551,8 @@ void send_vm(int fd, struct vm_create_params *vcp) {
 
 	log_info("paaaausing");
 
-	/* pause_vm(vcp); */
+	pause_vm(vcp);
+	sleep(3);
 	log_info("paaaaused");
 
 	vrp.vrwp_vm_id = vcp->vcp_id;
@@ -567,6 +572,11 @@ void send_vm(int fd, struct vm_create_params *vcp) {
 	ret = write(fd, &vrp, sizeof(struct vm_rwregs_params));
 	log_info("write ret: %d", ret);
 
+       i8253_dump(fd);
+   i8259_dump(fd);
+   ns8250_dump(fd);
+   mc146818_dump(fd);
+
 	dump_regs(&vrp.vrwp_regs);
 
 	/* log_info("Send RAX: %d", vrp.vrwp_regs.vrs_gprs[VCPU_REGS_RAX]); */
@@ -577,7 +587,7 @@ void send_vm(int fd, struct vm_create_params *vcp) {
 		log_info("writing to fd %zu\n", vmr->vmr_size);
 		mwrite(fd, vmr);
 	}
-	/* unpause_vm(vcp); */
+	unpause_vm(vcp);
 	close(fd);
 	log_info("DONE!");
 }
@@ -614,6 +624,17 @@ void pause_vm(struct vm_create_params *vcp) {
 		paused = 1;
 		return;
 	}
+	/* int fd; */
+	/* int			 nicfds[VMM_MAX_NICS_PER_VM]; */
+	/* fd = open("/tmp/test", "w"); */
+	/* paused_vcpus = 0; */
+	/* paused = 1; */
+	/* sleep(1); */
+	/* log_info("reinit"); */
+	/* init_emulated_hw(vcp, current_vm->vm_disks, nicfds); */
+	/* log_info("reinit done"); */
+	/* paused = 0; */
+	/* unpause_vm(vcp); */
 }
 
 void unpause_vm(struct vm_create_params *vcp) {
@@ -872,6 +893,68 @@ init_emulated_hw(struct vmop_create_params *vmc, int *child_disks,
 
 	/* Initialize virtio devices */
 	virtio_init(vmc, child_disks, child_taps);
+	hardware_initialized = 1;
+}
+/*
+ * restore_emulated_hw
+ *
+ * Restores the userspace hardware emulation from fd
+ */
+void
+restore_emulated_hw(struct vm_create_params *vcp, FILE *fp)
+{
+	/* struct vm_create_params *vcp = &vmc->vmc_params; */
+	int i;
+	uint64_t memlo, memhi;
+
+	/* Calculate memory size for NVRAM registers */
+	memlo = memhi = 0;
+	if (vcp->vcp_nmemranges > 2)
+		memlo = vcp->vcp_memranges[2].vmr_size - 15 * 0x100000;
+
+	if (vcp->vcp_nmemranges > 3)
+		memhi = vcp->vcp_memranges[3].vmr_size;
+
+	/* Reset the IO port map */
+	memset(&ioports_map, 0, sizeof(io_fn_t) * MAX_PORTS);
+
+	/* Init i8253 PIT */
+	i8253_restore(fp, vcp->vcp_id);
+	ioports_map[TIMER_CTRL] = vcpu_exit_i8253;
+	ioports_map[TIMER_BASE + TIMER_CNTR0] = vcpu_exit_i8253;
+	ioports_map[TIMER_BASE + TIMER_CNTR1] = vcpu_exit_i8253;
+	ioports_map[TIMER_BASE + TIMER_CNTR2] = vcpu_exit_i8253;
+
+	/* Init master and slave PICs */
+	i8259_restore(fp);
+	ioports_map[IO_ICU1] = vcpu_exit_i8259;
+	ioports_map[IO_ICU1 + 1] = vcpu_exit_i8259;
+	ioports_map[IO_ICU2] = vcpu_exit_i8259;
+	ioports_map[IO_ICU2 + 1] = vcpu_exit_i8259;
+
+	/* Init ns8250 UART */
+	ns8250_restore(fp, con_fd, vcp->vcp_id);
+	for (i = COM1_DATA; i <= COM1_SCR; i++)
+		ioports_map[i] = vcpu_exit_com;
+
+	/* Init mc146818 RTC */
+	mc146818_restore(fp, vcp->vcp_id);
+	mc146818_init(vcp->vcp_id, memlo, memhi);
+	ioports_map[IO_RTC] = vcpu_exit_mc146818;
+	ioports_map[IO_RTC + 1] = vcpu_exit_mc146818;
+
+	/* Initialize PCI */
+	for (i = VMM_PCI_IO_BAR_BASE; i <= VMM_PCI_IO_BAR_END; i++)
+		ioports_map[i] = vcpu_exit_pci;
+
+	ioports_map[PCI_MODE1_ADDRESS_REG] = vcpu_exit_pci;
+	ioports_map[PCI_MODE1_DATA_REG] = vcpu_exit_pci;
+	ioports_map[PCI_MODE1_DATA_REG + 1] = vcpu_exit_pci;
+	ioports_map[PCI_MODE1_DATA_REG + 2] = vcpu_exit_pci;
+	ioports_map[PCI_MODE1_DATA_REG + 3] = vcpu_exit_pci;
+	pci_restore(fp);
+	hardware_initialized = 1;
+
 }
 
 /*
@@ -895,7 +978,7 @@ run_vm(int *child_disks, int *child_taps, struct vmop_create_params *vmc,
     struct vcpu_reg_state *vrs)
 {
 	struct vm_create_params *vcp = &vmc->vmc_params;
-	struct vm_rwregs_params vregsp;
+	/* struct vm_rwregs_params vregsp; */
 	uint8_t evdone = 0;
 	size_t i;
 	int ret;
@@ -938,7 +1021,9 @@ run_vm(int *child_disks, int *child_taps, struct vmop_create_params *vmc,
 	log_debug("%s: initializing hardware for vm %s", __func__,
 	    vcp->vcp_name);
 
-	init_emulated_hw(vmc, child_disks, child_taps);
+	if(!hardware_initialized) {
+		init_emulated_hw(vmc, child_disks, child_taps);
+	}
 
 	ret = pthread_mutex_init(&threadmutex, NULL);
 	if (ret) {
@@ -987,11 +1072,12 @@ run_vm(int *child_disks, int *child_taps, struct vmop_create_params *vmc,
 			    __progname, i);
 			return (EIO);
 		}
-		vregsp.vrwp_vm_id = vcp->vcp_id;
-		vregsp.vrwp_regs = *vrs;
-		log_info(" %d", vcp->vcp_id);
-		log_info("Here RAX: 0x%llu", vregsp.vrwp_regs.vrs_gprs[VCPU_REGS_RAX]);
-		log_info("Here RIP: 0x%llu", vregsp.vrwp_regs.vrs_gprs[VCPU_REGS_RIP]);
+		/* vregsp.vrwp_vm_id = vcp->vcp_id; */
+		/* vregsp.vrwp_regs = *vrs; */
+		/* log_info(" %d", vcp->vcp_id); */
+		/* log_info("Here RAX: 0x%llu", vregsp.vrwp_regs.vrs_gprs[VCPU_REGS_RAX]); */
+		/* log_info("Here RIP: 0x%llu", vregsp.vrwp_regs.vrs_gprs[VCPU_REGS_RIP]); */
+		/* dump_regs(vrs); */
 
 		ret = pthread_cond_init(&vcpu_run_cond[i], NULL);
 		if (ret) {
@@ -1027,6 +1113,8 @@ run_vm(int *child_disks, int *child_taps, struct vmop_create_params *vmc,
 		log_warn("%s: could not create event thread", __func__);
 		return (ret);
 	}
+	/* i8253_fire(0, 0, vcp->vcp_id); */
+	/* log_info("blink"); */
 
 	for (;;) {
 		ret = pthread_cond_wait(&threadcond, &threadmutex);
@@ -1114,6 +1202,7 @@ vcpu_run_loop(void *arg)
 	struct vm_run_params *vrp = (struct vm_run_params *)arg;
 	intptr_t ret = 0;
 	int irq;
+	int flag = 0;
 	uint32_t n;
 	struct vm_create_params	*vcp = &current_vm->vm_params.vmc_params;
 
@@ -1123,6 +1212,7 @@ vcpu_run_loop(void *arg)
 	struct vm_rwregs_params vmrp;
 	vmrp.vrwp_vm_id = vcp->vcp_id;	
 	vmrp.vrwp_mask = -1;
+	/* vcpu_hlt[n] =1; */
 
 	for (;;) {
 		ret = pthread_mutex_lock(&vcpu_run_mtx[n]);
@@ -1132,6 +1222,11 @@ vcpu_run_loop(void *arg)
 			    __func__, (int)ret);
 			return ((void *)ret);
 		}
+
+		/* if (ioctl(env->vmd_fd, VMM_IOC_READREGS, &vmrp) < 0) { */
+		/* 	log_info ("readregs IOC error: %d, %d", errno, ENOENT); */
+		/* } */
+		/* dump_regs(&vmrp.vrwp_regs); */
 
 		/* If we are halted or paused, wait */
 		if (vcpu_hlt[n]) {
@@ -1165,6 +1260,7 @@ vcpu_run_loop(void *arg)
 		}
 
 		ret = pthread_mutex_unlock(&vcpu_run_mtx[n]);
+
 		if (ret) {
 			log_warnx("%s: can't unlock mutex on cond (%d)",
 			    __func__, (int)ret);
@@ -1203,6 +1299,14 @@ vcpu_run_loop(void *arg)
 			ret = (intptr_t)NULL;
 			break;
 		}
+		/* If the VM is terminating, exit normally */
+		if (vrp->vrp_exit_reason == VMX_EXIT_TRIPLE_FAULT) {
+			ret = (intptr_t)NULL;
+			log_info("TRIPLE FAULT!");
+			break;
+		}
+
+		/* log_info("exit reason: %d", vrp->vrp_exit_reason); */
 
 		if (vrp->vrp_exit_reason != VM_EXIT_NONE) {
 			/*
@@ -1212,6 +1316,9 @@ vcpu_run_loop(void *arg)
 			ret = vcpu_exit(vrp);
 			if (ret)
 				break;
+		}
+		if (flag==0) {
+			flag = 1;
 		}
 	}
 
@@ -1636,37 +1743,37 @@ mutex_unlock(pthread_mutex_t *m)
 }
 
 void dump_regs(struct vcpu_reg_state *vrs) {
-	log_info("VCPU_REGS_RAX	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RAX]);
-	log_info("VCPU_REGS_RBX	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RBX]);
-	log_info("VCPU_REGS_RCX	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RCX]);
-	log_info("VCPU_REGS_RDX	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RDX]);
-	log_info("VCPU_REGS_RSI	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RSI]);
-	log_info("VCPU_REGS_RDI	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RDI]);
-	log_info("VCPU_REGS_R8	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R8]);
-	log_info("VCPU_REGS_R9	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R9]);
-	log_info("VCPU_REGS_R10	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R10]);
-	log_info("VCPU_REGS_R11	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R11]);
-	log_info("VCPU_REGS_R12	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R12]);
-	log_info("VCPU_REGS_R13	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R13]);
-	log_info("VCPU_REGS_R14	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R14]);
-	log_info("VCPU_REGS_R15	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R15]);
-	log_info("VCPU_REGS_RSP	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RSP]);
-	log_info("VCPU_REGS_RBP	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RBP]);
+	/* log_info("VCPU_REGS_RAX	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RAX]); */
+	/* log_info("VCPU_REGS_RBX	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RBX]); */
+	/* log_info("VCPU_REGS_RCX	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RCX]); */
+	/* log_info("VCPU_REGS_RDX	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RDX]); */
+	/* log_info("VCPU_REGS_RSI	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RSI]); */
+	/* log_info("VCPU_REGS_RDI	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RDI]); */
+	/* log_info("VCPU_REGS_R8	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R8]); */
+	/* log_info("VCPU_REGS_R9	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R9]); */
+	/* log_info("VCPU_REGS_R10	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R10]); */
+	/* log_info("VCPU_REGS_R11	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R11]); */
+	/* log_info("VCPU_REGS_R12	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R12]); */
+	/* log_info("VCPU_REGS_R13	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R13]); */
+	/* log_info("VCPU_REGS_R14	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R14]); */
+	/* log_info("VCPU_REGS_R15	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_R15]); */
+	/* log_info("VCPU_REGS_RSP	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RSP]); */
+	/* log_info("VCPU_REGS_RBP	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RBP]); */
 	log_info("VCPU_REGS_RIP	   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RIP]);
-	log_info("VCPU_REGS_RFLAGS   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RFLAGS]);
-	log_info("VCPU_REGS_CR0	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR0]);
-	log_info("VCPU_REGS_CR2	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR2]);
-	log_info("VCPU_REGS_CR3	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR3]);
-	log_info("VCPU_REGS_CR4	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR4]);
-	log_info("VCPU_REGS_CR8	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR8]);
-	log_info("VCPU_REGS_CS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_CS].vsi_base, vrs->vrs_sregs[VCPU_REGS_CS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_CS].vsi_sel);
-	log_info("VCPU_REGS_DS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_DS].vsi_base, vrs->vrs_sregs[VCPU_REGS_DS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_DS].vsi_sel);
-	log_info("VCPU_REGS_ES	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_ES].vsi_base, vrs->vrs_sregs[VCPU_REGS_ES].vsi_limit, vrs->vrs_sregs[VCPU_REGS_ES].vsi_sel);
-	log_info("VCPU_REGS_FS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_FS].vsi_base, vrs->vrs_sregs[VCPU_REGS_FS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_FS].vsi_sel);
-	log_info("VCPU_REGS_GS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_GS].vsi_base, vrs->vrs_sregs[VCPU_REGS_GS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_GS].vsi_sel);
-	log_info("VCPU_REGS_SS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_SS].vsi_base, vrs->vrs_sregs[VCPU_REGS_SS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_SS].vsi_sel);
-	log_info("VCPU_REGS_LDTR   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_gdtr.vsi_base, vrs->vrs_gdtr.vsi_limit, vrs->vrs_gdtr.vsi_sel);
-	log_info("VCPU_REGS_IDTR   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_idtr.vsi_base, vrs->vrs_idtr.vsi_limit, vrs->vrs_idtr.vsi_sel);
+	/* log_info("VCPU_REGS_RFLAGS   : 0x%016llx", vrs->vrs_gprs[VCPU_REGS_RFLAGS]); */
+	/* log_info("VCPU_REGS_CR0	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR0]); */
+	/* log_info("VCPU_REGS_CR2	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR2]); */
+	/* log_info("VCPU_REGS_CR3	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR3]); */
+	/* log_info("VCPU_REGS_CR4	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR4]); */
+	/* log_info("VCPU_REGS_CR8	   : 0x%016llx", vrs->vrs_crs[VCPU_REGS_CR8]); */
+	/* log_info("VCPU_REGS_CS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_CS].vsi_base, vrs->vrs_sregs[VCPU_REGS_CS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_CS].vsi_sel); */
+	/* log_info("VCPU_REGS_DS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_DS].vsi_base, vrs->vrs_sregs[VCPU_REGS_DS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_DS].vsi_sel); */
+	/* log_info("VCPU_REGS_ES	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_ES].vsi_base, vrs->vrs_sregs[VCPU_REGS_ES].vsi_limit, vrs->vrs_sregs[VCPU_REGS_ES].vsi_sel); */
+	/* log_info("VCPU_REGS_FS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_FS].vsi_base, vrs->vrs_sregs[VCPU_REGS_FS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_FS].vsi_sel); */
+	/* log_info("VCPU_REGS_GS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_GS].vsi_base, vrs->vrs_sregs[VCPU_REGS_GS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_GS].vsi_sel); */
+	/* log_info("VCPU_REGS_SS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_SS].vsi_base, vrs->vrs_sregs[VCPU_REGS_SS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_SS].vsi_sel); */
+	/* log_info("VCPU_REGS_LDTR   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_gdtr.vsi_base, vrs->vrs_gdtr.vsi_limit, vrs->vrs_gdtr.vsi_sel); */
+	/* log_info("VCPU_REGS_IDTR   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_idtr.vsi_base, vrs->vrs_idtr.vsi_limit, vrs->vrs_idtr.vsi_sel); */
 }
 
 /*
