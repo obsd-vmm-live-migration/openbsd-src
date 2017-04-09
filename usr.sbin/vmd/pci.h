@@ -92,6 +92,5 @@ int pci_add_bar(uint8_t, uint32_t, void *, void *);
 uint8_t pci_get_dev_irq(uint8_t);
 
 
-
 void pci_dump(int fd);
-void pci_restore(FILE*);
+void pci_restore(FILE *);

@@ -23,6 +23,7 @@
 #include <dev/pv/virtioreg.h>
 #include <machine/vmmvar.h>
 
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include "vmd.h"
@@ -394,7 +395,6 @@ pci_dump(int fd) {
 void
 pci_restore(FILE *fp) {
 	int ret;
-	log_info("pci size %d", sizeof(pci));
 	ret = fread(&pci, 1, sizeof(pci), fp);
 	log_info("restore pci %d", ret);
 }

@@ -1191,7 +1191,6 @@ vcpu_run_loop(void *arg)
 	struct vm_run_params *vrp = (struct vm_run_params *)arg;
 	intptr_t ret = 0;
 	int irq;
-	int flag = 0;
 	uint32_t n;
 	struct vm_create_params	*vcp = &current_vm->vm_params.vmc_params;
 
@@ -1327,9 +1326,6 @@ vcpu_run_loop(void *arg)
 			ret = vcpu_exit(vrp);
 			if (ret)
 				break;
-		}
-		if (flag==0) {
-			flag = 1;
 		}
 	}
 
