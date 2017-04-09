@@ -654,9 +654,6 @@ i8259_dump(int fd) {
 void
 i8259_restore(FILE *fp) {
 	int ret;
-	/* char buf[4096]; */
-	/* ret = read(fd, &buf, sizeof(pics)); */
-	/* return; */
 	ret = fread(&pics, 1,  sizeof(pics), fp);
 	log_info("restore pic %d", ret);
 }
