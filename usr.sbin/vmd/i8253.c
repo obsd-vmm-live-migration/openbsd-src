@@ -340,14 +340,22 @@ i8253_reset(uint8_t chn)
 void
 i8253_fire(int fd, short type, void *arg)
 {
+	/* log_info("8253 fire"); */
 	struct timeval tv;
 	struct i8253_counter *ctr = (struct i8253_counter *)arg;
 
 
-	timerclear(&tv);
-	tv.tv_usec = (ctr->start * NS_PER_TICK) / 1000;
+	/* log_info("trying to clear timer"); */
 
+	timerclear(&tv);
+	/* log_info("timer cleared"); */
+	/* log_info("start %d", ctr->start); */
+	tv.tv_usec = (ctr->start * NS_PER_TICK) / 1000;
+	/* log_info("tv calculated"); */
+
+	/* log_info("trying to assert"); */
 	vcpu_assert_pic_irq(ctr->vm_id, 0, 0);
+	/* log_info("asserted"); */
 
 	if (ctr->mode != TIMER_INTTC)
 		evtimer_add(&ctr->timer, &tv);
@@ -366,7 +374,20 @@ i8253_restore(FILE *fp, uint32_t vm_id) {
 	int ret;
 	ret = fread(&i8253_counter, 1, sizeof(i8253_counter), fp);
 	log_info("restore 8253 %d", ret);
+	log_info("start 8253 %d", i8253_counter[0].start);
 	memset(&i8253_counter[0].timer, 0, sizeof(struct event));
-	evtimer_set(&i8253_counter[0].timer, i8253_fire,
-	    (void *)(intptr_t)vm_id);
+	memset(&i8253_counter[1].timer, 0, sizeof(struct event));
+	memset(&i8253_counter[2].timer, 0, sizeof(struct event));
+	/* i8253_counter[0].start = 0xFFFF; */
+	/* i8253_counter[1].start = 0xFFFF; */
+	/* i8253_counter[2].start = 0xFFFF; */
+
+	i8253_counter[0].vm_id = vm_id;
+	i8253_counter[1].vm_id = vm_id;
+	i8253_counter[2].vm_id = vm_id;
+
+	evtimer_set(&i8253_counter[0].timer, i8253_fire, &i8253_counter[0]);
+	evtimer_set(&i8253_counter[1].timer, i8253_fire, &i8253_counter[1]);
+	evtimer_set(&i8253_counter[2].timer, i8253_fire, &i8253_counter[2]);
+	i8253_reset(0);
 }

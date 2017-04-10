@@ -62,7 +62,6 @@ ns8250_init(int fd, uint32_t vmid)
 static void
 com_rcv_event(int fd, short kind, void *arg)
 {
-	/* log_info("com rcv event"); */
 	mutex_lock(&com1_dev.mutex);
 
 	/*
