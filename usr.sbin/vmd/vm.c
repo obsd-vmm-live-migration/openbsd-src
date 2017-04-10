@@ -1203,6 +1203,7 @@ vcpu_run_loop(void *arg)
 	/* vcpu_hlt[n] =1; */
 
 	for (;;) {
+
 		ret = pthread_mutex_lock(&vcpu_run_mtx[n]);
 
 		if (ret) {
@@ -1644,23 +1645,32 @@ vcpu_assert_pic_irq(uint32_t vm_id, uint32_t vcpu_id, int irq)
 {
 	int ret;
 
+	/* log_info("1: about to assert irq %d %d %d", irq, vcpu_id, vm_id); */
+
 	i8259_assert_irq(irq);
 
-	if (i8259_is_pending()) {
-		if (vcpu_pic_intr(vm_id, vcpu_id, 1))
-			fatalx("%s: can't assert INTR", __func__);
+	/* log_info("2: asserted irq %d", irq); */
 
+	if (i8259_is_pending()) {
+		/* log_info("3: is pending"); */
+		if (ret = vcpu_pic_intr(vm_id, vcpu_id, 1))
+			fatalx("%s: can't assert INTR: %d, %d %d", __func__, vm_id, vcpu_id, ret);
+
+		/* log_info("4: acquiring run mutex"); */
 		ret = pthread_mutex_lock(&vcpu_run_mtx[vcpu_id]);
 		if (ret)
 			fatalx("%s: can't lock vcpu mtx (%d)", __func__, ret);
 
 		vcpu_hlt[vcpu_id] = 0;
+		/* log_info("5: signal run cond"); */
 		ret = pthread_cond_signal(&vcpu_run_cond[vcpu_id]);
 		if (ret)
 			fatalx("%s: can't signal (%d)", __func__, ret);
+		/* log_info("6: unlocking mutex"); */
 		ret = pthread_mutex_unlock(&vcpu_run_mtx[vcpu_id]);
 		if (ret)
 			fatalx("%s: can't unlock vcpu mtx (%d)", __func__, ret);
+		/* log_info("7: unlocked mutex"); */
 	}
 }
 
