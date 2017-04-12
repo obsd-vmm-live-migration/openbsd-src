@@ -415,6 +415,7 @@ receive_vm(struct vmd_vm *vm, int recv_fd, int fd) {
 
 	log_info("Should run now");
 	/* Execute the vcpu run loop(s) for this VM */
+	sleep(5);
 	ret = run_vm(vm->vm_disks, nicfds, &vm->vm_params, &vrs);
 
 	return (ret);
@@ -544,6 +545,12 @@ void send_vm(int fd, struct vm_create_params *vcp) {
 	struct vm_rwregs_params vrp;
 	struct vmop_create_params *vmc;
 	unsigned int flags = 0;
+
+
+	i8253_stop();
+	mc146818_stop();
+	sleep(1);
+
 	vmc = calloc(1, sizeof(struct vmop_create_params));
 	flags |= VMOP_CREATE_MEMORY;
 	memcpy(&vmc->vmc_params, vcp, sizeof(struct vm_create_params));

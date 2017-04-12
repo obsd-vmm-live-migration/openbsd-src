@@ -333,3 +333,9 @@ mc146818_restore(FILE *fp, uint32_t vm_id) {
 	evtimer_add(&rtc.per, &rtc.per_tv);
 	evtimer_add(&rtc.sec, &rtc.sec_tv);
 }
+
+void
+mc146818_stop(FILE *fp, uint32_t vm_id) {
+	evtimer_del(&rtc.per);
+	evtimer_del(&rtc.sec);
+}
