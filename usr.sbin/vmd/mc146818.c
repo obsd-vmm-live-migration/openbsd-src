@@ -335,7 +335,7 @@ mc146818_restore(FILE *fp, uint32_t vm_id) {
 }
 
 void
-mc146818_stop(FILE *fp, uint32_t vm_id) {
+mc146818_stop() {
 	evtimer_del(&rtc.per);
 	evtimer_del(&rtc.sec);
 }
