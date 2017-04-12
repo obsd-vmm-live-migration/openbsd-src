@@ -391,3 +391,10 @@ i8253_restore(FILE *fp, uint32_t vm_id) {
 	evtimer_set(&i8253_counter[2].timer, i8253_fire, &i8253_counter[2]);
 	i8253_reset(0);
 }
+
+void
+i8253_stop() {
+	evtimer_del(&i8253_counter[0].timer);
+	evtimer_del(&i8253_counter[1].timer);
+	evtimer_del(&i8253_counter[2].timer);
+}
