@@ -1333,7 +1333,9 @@ vcpu_readregs_vmx(struct vcpu *vcpu, uint64_t regmask,
 	uint64_t sel, limit, ar;
 	uint64_t *gprs = vrs->vrs_gprs;
 	uint64_t *crs = vrs->vrs_crs;
+	uint64_t *msrs = vrs->vrs_msrs;
 	struct vcpu_segment_info *sregs = vrs->vrs_sregs;
+	struct vmx_msr_store *msr_store;
 
 	if (vcpu_reload_vmcs_vmx(&vcpu->vc_control_pa))
 		return (EINVAL);
@@ -1401,6 +1403,24 @@ vcpu_readregs_vmx(struct vcpu *vcpu, uint64_t regmask,
 			goto errout;
 	}
 
+	msr_store = (struct vmx_msr_store *)vcpu->vc_vmx_msr_exit_save_va;
+
+	if (regmask & VM_RWREGS_MSRS) {
+		for (i = 0; i < VCPU_REGS_NMSRS; i++) {
+			msrs[i] = msr_store[i].vms_data;
+		}
+	}
+
+
+	for (i = 0; i < VMX_NUM_MSR_STORE; i++) {
+		DPRINTF("  MSR %d @ %p : 0x%08llx (%s), "
+		    "value=0x%016llx ",
+		    i, &msr_store[i], msr_store[i].vms_index,
+		    msr_name_decode(msr_store[i].vms_index),
+		    msr_store[i].vms_data); 
+		vmm_decode_msr_value(msr_store[i].vms_index,
+		    msr_store[i].vms_data);
+	}
 	goto out;
 
 errout:
@@ -1447,7 +1467,9 @@ vcpu_writeregs_vmx(struct vcpu *vcpu, uint64_t regmask, int loadvmcs,
 	uint64_t limit, ar;
 	uint64_t *gprs = vrs->vrs_gprs;
 	uint64_t *crs = vrs->vrs_crs;
+	uint64_t *msrs = vrs->vrs_msrs;
 	struct vcpu_segment_info *sregs = vrs->vrs_sregs;
+	struct vmx_msr_store *msr_store;
 
 	if (loadvmcs) {
 		if (vcpu_reload_vmcs_vmx(&vcpu->vc_control_pa))
@@ -1515,6 +1537,14 @@ vcpu_writeregs_vmx(struct vcpu *vcpu, uint64_t regmask, int loadvmcs,
 			goto errout;
 		if (vmwrite(VMCS_GUEST_IA32_CR4, crs[VCPU_REGS_CR4]))
 			goto errout;
+	}
+
+	msr_store = (struct vmx_msr_store *)vcpu->vc_vmx_msr_exit_save_va;
+
+	if (regmask & VM_RWREGS_MSRS) {
+		for (i = 0; i < VCPU_REGS_NMSRS; i++) {
+			msr_store[i].vms_data = msrs[i];
+		}
 	}
 
 	goto out;

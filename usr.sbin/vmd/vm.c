@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm.c,v 1.11 2017/03/27 00:28:04 deraadt Exp $	*/
+/*	$OpenBSD: vm.c,v 2.11 2017/03/27 00:28:04 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2015 Mike Larkin <mlarkin@openbsd.org>
@@ -146,6 +146,12 @@ static const struct vcpu_reg_state vcpu_init_flat32 = {
 	.vrs_idtr = { 0x0, 0xFFFF, 0x0, 0x0},
 	.vrs_sregs[VCPU_REGS_LDTR] = { 0x0, 0xFFFF, 0x0082, 0x0},
 	.vrs_sregs[VCPU_REGS_TR] = { 0x0, 0xFFFF, 0x008B, 0x0},
+	.vrs_msrs[VCPU_REGS_EFER] = EFER_LME,
+	.vrs_msrs[VCPU_REGS_STAR] = 0ULL,
+	.vrs_msrs[VCPU_REGS_LSTAR] = 0ULL,
+	.vrs_msrs[VCPU_REGS_CSTAR] = 0ULL,
+	.vrs_msrs[VCPU_REGS_SFMASK] = 0ULL,
+	.vrs_msrs[VCPU_REGS_KGSBASE] = 0ULL
 };
 
 /*
@@ -392,6 +398,7 @@ receive_vm(struct vmd_vm *vm, int recv_fd, int fd) {
 	if (pledge("stdio vmm recvfd", NULL) == -1)
 		fatal("pledge");
 	vrs = vrp.vrwp_regs;
+	/* vrs.vrs_gprs[VCPU_REGS_RFLAGS] = 0x46; */
 	/* memcpy(&vrs, &vcpu_init_flat32, sizeof(struct vcpu_reg_state)); */
 
 	con_fd = vm->vm_tty;
@@ -885,8 +892,10 @@ init_emulated_hw(struct vmop_create_params *vmc, int *child_disks,
 
 	/* Init ns8250 UART */
 	ns8250_init(con_fd, vcp->vcp_id);
-	for (i = COM1_DATA; i <= COM1_SCR; i++)
+	for (i = COM1_DATA; i <= COM1_SCR; i++) {
 		ioports_map[i] = vcpu_exit_com;
+		log_info("uarts: 0x%x", i);
+	}
 
 	/* Initialize PCI */
 	for (i = VMM_PCI_IO_BAR_BASE; i <= VMM_PCI_IO_BAR_END; i++)
@@ -1302,6 +1311,10 @@ vcpu_run_loop(void *arg)
 			break;
 		}
 
+		/* if (vrp->vrp_exit_reason == 7) { */
+		/* 	log_info("window exit"); */
+		/* } */
+        /*  */
 		/* log_info("exit reason: %d", vrp->vrp_exit_reason); */
 
 		if (vrp->vrp_exit_reason != VM_EXIT_NONE) {
@@ -1396,9 +1409,18 @@ vcpu_exit_inout(struct vm_run_params *vrp)
 {
 	union vm_exit *vei = vrp->vrp_exit;
 	uint8_t intr = 0xFF;
+	int i;
 
-	if (ioports_map[vei->vei.vei_port] != NULL)
+	/* log_debug("in out 0x%x", vei->vei.vei_port); */
+
+	if (ioports_map[vei->vei.vei_port] != NULL) {
 		intr = ioports_map[vei->vei.vei_port](vrp);
+		/* for (i = COM1_DATA; i <= COM1_SCR; i++) { */
+		/* 	if (vei->vei.vei_port == i) { */
+		/* 		log_info("uarts: 0x%x %s", i, vei->vei.vei_data); */
+		/* 	} */
+		/* } */
+	}
 	else if (vei->vei.vei_dir == VEI_DIR_IN)
 			set_return_data(vei, 0xFFFFFFFF);
 
@@ -1776,6 +1798,14 @@ void dump_regs(struct vcpu_reg_state *vrs) {
 	/* log_info("VCPU_REGS_SS	   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_sregs[VCPU_REGS_SS].vsi_base, vrs->vrs_sregs[VCPU_REGS_SS].vsi_limit, vrs->vrs_sregs[VCPU_REGS_SS].vsi_sel); */
 	/* log_info("VCPU_REGS_LDTR   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_gdtr.vsi_base, vrs->vrs_gdtr.vsi_limit, vrs->vrs_gdtr.vsi_sel); */
 	/* log_info("VCPU_REGS_IDTR   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_idtr.vsi_base, vrs->vrs_idtr.vsi_limit, vrs->vrs_idtr.vsi_sel); */
+
+
+	log_info("VCPU_REGS_EFER   	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_EFER]);
+	log_info("VCPU_REGS_STAR   	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_STAR]);
+	log_info("VCPU_REGS_LSTAR  	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_LSTAR]);
+	log_info("VCPU_REGS_CSTAR  	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_CSTAR]);
+	log_info("VCPU_REGS_SFMASK 	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_SFMASK]);
+	log_info("VCPU_REGS_KGSBASE	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_KGSBASE]);
 }
 
 /*
