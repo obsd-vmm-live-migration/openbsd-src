@@ -591,6 +591,7 @@ void send_vm(int fd, struct vm_create_params *vcp) {
    ns8250_dump(fd);
    mc146818_dump(fd);
    pci_dump(fd);
+   virtio_dump(fd);
 
 	dump_regs(&vrp.vrwp_regs);
 
