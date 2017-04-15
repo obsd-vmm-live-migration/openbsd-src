@@ -1781,3 +1781,43 @@ virtio_init(struct vmop_create_params *vmc, int *child_disks, int *child_taps)
 
 	evtimer_set(&vmmci.timeout, vmmci_timeout, NULL);
 }
+
+void
+vmmci_restore(FILE *fp, uint32_t vm_id) {
+	int ret;
+	ret = fread(&vmmci, 1, sizeof(vmmci), fp);
+	log_info("restore vmmci %d", ret);
+	vmmci.vm_id = vm_id;
+	memset(&vmmci.timeout, 0, sizeof(struct event));
+	evtimer_set(&vmmci.timeout, vmmci_timeout, NULL);
+}
+
+void
+viornd_restore(FILE *fp) {
+	int ret;
+	ret = fread(&viornd, 1, sizeof(viornd), fp);
+	log_info("restore vmmci %d", ret);
+}
+
+void
+virtio_restore(FILE *fp, struct vm_create_params *vcp, int *child_disks, int *child_taps) {
+	vmmci_restore(fp, vcp->vcp_id);
+	viornd_restore(fp);
+}
+
+void
+viornd_dump(int fd) {
+	int ret;
+	ret = write(fd, &viornd, sizeof(viornd));
+	log_info("viornd dump %d", ret);
+}
+
+void vmmci_dump(int fd) {
+	write(fd, &vmmci, sizeof(vmmci));
+}
+
+void virtio_dump(int fd) {
+	vmmci_dump(fd);
+	viornd_dump(fd);
+}
+

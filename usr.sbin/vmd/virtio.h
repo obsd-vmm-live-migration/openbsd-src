@@ -155,6 +155,8 @@ struct vmmci_dev {
 };
 
 void virtio_init(struct vmop_create_params *, int *, int *);
+void virtio_dump(int fd);
+void virtio_restore(FILE *, struct vm_create_params *, int *, int *);
 uint32_t vring_size(uint32_t);
 
 int virtio_rnd_io(int, uint16_t, uint32_t *, uint8_t *, void *, uint8_t);
