@@ -958,6 +958,7 @@ restore_emulated_hw(struct vm_create_params *vcp, FILE *fp)
 	ioports_map[PCI_MODE1_DATA_REG + 2] = vcpu_exit_pci;
 	ioports_map[PCI_MODE1_DATA_REG + 3] = vcpu_exit_pci;
 	pci_restore(fp);
+	virtio_restore(fp, vcp, NULL, NULL);
 	hardware_initialized = 1;
 
 }
