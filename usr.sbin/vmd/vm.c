@@ -486,7 +486,7 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 			break;
 		case IMSG_VMDOP_PAUSE_VM:
 			vmr.vmr_result = 0;
-			vmr.vmr_id = vm->vm_params.vmc_params.vcp_id;
+			vmr.vmr_id = vm->vm_vmid;
 			pause_vm(&vm->vm_params.vmc_params);
 			log_info("paused vm: %d", vmr.vmr_id);
 			imsg_compose_event(&vm->vm_iev,
@@ -495,7 +495,7 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 			break;
 		case IMSG_VMDOP_UNPAUSE_VM:
 			vmr.vmr_result = 0;
-			vmr.vmr_id = vm->vm_params.vmc_params.vcp_id;
+			vmr.vmr_id = vm->vm_vmid;
 			unpause_vm(&vm->vm_params.vmc_params);
 			log_info("unpaused vm: %d", vmr.vmr_id);
 			imsg_compose_event(&vm->vm_iev,
@@ -557,6 +557,7 @@ void send_vm(int fd, struct vm_create_params *vcp) {
 	i8253_stop();
 	mc146818_stop();
 	sleep(1);
+
 
 	vmc = calloc(1, sizeof(struct vmop_create_params));
 	flags |= VMOP_CREATE_MEMORY;

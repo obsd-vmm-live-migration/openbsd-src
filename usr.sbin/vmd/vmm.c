@@ -213,7 +213,7 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		IMSG_SIZE_CHECK(imsg, &vid);
 		memcpy(&vid, imsg->data, sizeof(vid));
 		id = vid.vid_id;
-		vm = vm_getbyid(id);
+		vm = vm_getbyvmid(id);
 		imsg_compose_event(&vm->vm_iev,
 			imsg->hdr.type, imsg->hdr.peerid, imsg->hdr.pid,
 			imsg->fd, &vid, sizeof(vid));
