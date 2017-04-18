@@ -588,7 +588,6 @@ void send_vm(int fd, struct vm_create_params *vcp) {
    i8259_dump(fd);
    ns8250_dump(fd);
    mc146818_dump(fd);
-   pci_dump(fd);
    virtio_dump(fd);
 
 	dump_regs(&vrp.vrwp_regs);
@@ -956,7 +955,6 @@ restore_emulated_hw(struct vm_create_params *vcp, FILE *fp, int *child_taps)
 	ioports_map[PCI_MODE1_DATA_REG + 1] = vcpu_exit_pci;
 	ioports_map[PCI_MODE1_DATA_REG + 2] = vcpu_exit_pci;
 	ioports_map[PCI_MODE1_DATA_REG + 3] = vcpu_exit_pci;
-	pci_restore(fp);
 	pci_init();
 	virtio_restore(fp, vcp, NULL, child_taps);
 	hardware_initialized = 1;
