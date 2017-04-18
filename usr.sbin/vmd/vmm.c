@@ -230,7 +230,8 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		log_info("Receiving vm_name: %p", vm);
 		log_info("vm_id: %d", id);
 
-		vmm_receive_vm(vm, imsg->fd);
+		res = vmm_receive_vm(vm, imsg->fd);
+		cmd = IMSG_VMDOP_START_VM_RESPONSE;
 
 		/* log_info("Got vmc in vmm %s", vmc.vmc_params.vcp_name); */
 		/* log_info("Getting vrp: %d", sizeof(vrp)); */
@@ -603,6 +604,7 @@ vmm_receive_vm(struct vmd_vm *vm, int fd)
 	struct vm_create_params	*vcp;
 	int			 ret = EINVAL;
 	int			 fds[2];
+	int i;
 
 	vcp = &vm->vm_params.vmc_params;
 
@@ -625,15 +627,15 @@ vmm_receive_vm(struct vmd_vm *vm, int fd)
 		close(fds[1]);
 
 		/* XXX: No disks and NICs yet */
-		/* for (i = 0 ; i < vcp->vcp_ndisks; i++) { */
-		/* 	close(vm->vm_disks[i]); */
-		/* 	vm->vm_disks[i] = -1; */
-		/* } */
-        /*  */
-		/* for (i = 0 ; i < vcp->vcp_nnics; i++) { */
-		/* 	close(vm->vm_ifs[i].vif_fd); */
-		/* 	vm->vm_ifs[i].vif_fd = -1; */
-		/* } */
+		for (i = 0 ; i < vcp->vcp_ndisks; i++) {
+			close(vm->vm_disks[i]);
+			vm->vm_disks[i] = -1;
+		}
+
+		for (i = 0 ; i < vcp->vcp_nnics; i++) {
+			close(vm->vm_ifs[i].vif_fd);
+			vm->vm_ifs[i].vif_fd = -1;
+		}
 
 		close(vm->vm_kernel);
 		vm->vm_kernel = -1;

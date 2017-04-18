@@ -1785,8 +1785,25 @@ virtio_init(struct vmop_create_params *vmc, int *child_disks, int *child_taps)
 void
 vmmci_restore(FILE *fp, uint32_t vm_id) {
 	int ret;
+	uint8_t id;
 	ret = fread(&vmmci, 1, sizeof(vmmci), fp);
 	log_info("restore vmmci %d", ret);
+	if (pci_add_device(&id, PCI_VENDOR_OPENBSD,
+	    PCI_PRODUCT_OPENBSD_CONTROL,
+	    PCI_CLASS_COMMUNICATIONS,
+	    PCI_SUBCLASS_COMMUNICATIONS_MISC,
+	    PCI_VENDOR_OPENBSD,
+	    PCI_PRODUCT_VIRTIO_VMMCI, 1, NULL)) {
+		log_warnx("%s: can't add PCI vmm control device",
+		    __progname);
+		return;
+	}
+
+	if (pci_add_bar(id, PCI_MAPREG_TYPE_IO, vmmci_io, NULL)) {
+		log_warnx("%s: can't add bar for vmm control device",
+		    __progname);
+		return;
+	}
 	vmmci.vm_id = vm_id;
 	memset(&vmmci.timeout, 0, sizeof(struct event));
 	evtimer_set(&vmmci.timeout, vmmci_timeout, NULL);
@@ -1796,13 +1813,77 @@ void
 viornd_restore(FILE *fp) {
 	int ret;
 	ret = fread(&viornd, 1, sizeof(viornd), fp);
-	log_info("restore vmmci %d", ret);
+	log_info("restore viornd %d", ret);
+}
+
+void
+vionet_restore(FILE *fp, struct vm_create_params *vcp, int *child_taps) {
+	int ret;
+	int i;
+	uint8_t id;
+	nr_vionet = vcp->vcp_nnics;
+	if (vcp->vcp_nnics > 0) {
+		vionet = calloc(vcp->vcp_nnics, sizeof(struct vionet_dev));
+		if (vionet == NULL) {
+			log_warn("%s: calloc failure allocating vionets",
+			    __progname);
+			return;
+		}
+		ret = fread(vionet, vcp->vcp_nnics, sizeof(struct vionet_dev), fp);
+		log_info("restore vionet %d", ret);
+		log_info("vio%s", ether_ntoa((void *)vionet[0].mac));
+
+		/* vionet = calloc(vcp->vcp_nnics, sizeof(struct vionet_dev)); */
+
+		/* Virtio network */
+		for (i = 0; i < vcp->vcp_nnics; i++) {
+			if (pci_add_device(&id, PCI_VENDOR_QUMRANET,
+			    PCI_PRODUCT_QUMRANET_VIO_NET, PCI_CLASS_SYSTEM,
+			    PCI_SUBCLASS_SYSTEM_MISC,
+			    PCI_VENDOR_OPENBSD,
+			    PCI_PRODUCT_VIRTIO_NETWORK, 1, NULL)) {
+				log_warnx("%s: can't add PCI virtio net device",
+				    __progname);
+				return;
+			}
+
+			if (pci_add_bar(id, PCI_MAPREG_TYPE_IO, virtio_net_io,
+			    &vionet[i])) {
+				log_warnx("%s: can't add bar for virtio net "
+				    "device", __progname);
+				return;
+			}
+
+			memset(&vionet[i].mutex, 0, sizeof(pthread_mutex_t));
+			ret = pthread_mutex_init(&vionet[i].mutex, NULL);
+
+			if (ret) {
+				errno = ret;
+				log_warn("%s: could not initialize mutex "
+				    "for vionet device", __progname);
+				return;
+			}
+			vionet[i].fd = child_taps[i];
+			vionet[i].rx_pending = 0;
+			vionet[i].vm_id = vcp->vcp_id;
+
+			memset(&vionet[i].event, 0, sizeof(struct event));
+			event_set(&vionet[i].event, vionet[i].fd,
+			    EV_READ | EV_PERSIST, vionet_rx_event, &vionet[i]);
+			if (event_add(&vionet[i].event, NULL)) {
+				log_warn("could not initialize vionet event "
+				    "handler");
+				return;
+			}
+		}
+	}
 }
 
 void
 virtio_restore(FILE *fp, struct vm_create_params *vcp, int *child_disks, int *child_taps) {
 	vmmci_restore(fp, vcp->vcp_id);
 	viornd_restore(fp);
+	vionet_restore(fp, vcp, child_taps);
 }
 
 void
@@ -1812,12 +1893,21 @@ viornd_dump(int fd) {
 	log_info("viornd dump %d", ret);
 }
 
-void vmmci_dump(int fd) {
+void
+vmmci_dump(int fd) {
 	write(fd, &vmmci, sizeof(vmmci));
+}
+
+void
+vionet_dump(int fd) {
+	int ret;
+	ret = write(fd, vionet, nr_vionet * sizeof(struct vionet_dev));
+	log_info("vionet dump %d", ret);
 }
 
 void virtio_dump(int fd) {
 	vmmci_dump(fd);
 	viornd_dump(fd);
+	vionet_dump(fd);
 }
 
