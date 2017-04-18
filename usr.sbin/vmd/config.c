@@ -443,13 +443,11 @@ config_set_receivedvm(struct privsep *ps, struct vmd_vm *vm, uint32_t peerid, ui
 
 	/* Open TTY */
 	if (vm->vm_ttyname == NULL) {
-		log_info("it's null, jim");
 		if (vm_opentty(vm) == -1) {
 			log_warn("%s: can't open tty %s", __func__,
 			    vm->vm_ttyname == NULL ? "" : vm->vm_ttyname);
 			goto fail;
 		}
-		log_info("and now, it's %s", vm->vm_ttyname);
 	}
 	if ((fd = dup(vm->vm_tty)) == -1) {
 		log_warn("%s: can't re-open tty %s", __func__, vm->vm_ttyname);
@@ -465,16 +463,15 @@ config_set_receivedvm(struct privsep *ps, struct vmd_vm *vm, uint32_t peerid, ui
 	/* 	    IMSG_VMDOP_START_VM_DISK, vm->vm_vmid, diskfds[i], */
 	/* 	    &i, sizeof(i)); */
 	/* } */
-	/* for (i = 0; i < vcp->vcp_nnics; i++) { */
-	/* 	proc_compose_imsg(ps, PROC_VMM, -1, */
-	/* 	    IMSG_VMDOP_START_VM_IF, vm->vm_vmid, tapfds[i], */
-	/* 	    &i, sizeof(i)); */
-	/* } */
-
-	log_info("---------before sending: %d", vm->vm_vmid);
 
 	proc_compose_imsg(ps, PROC_VMM, -1,
 	    IMSG_VMDOP_RECEIVE_VM, vm->vm_vmid, fd,  vmc, sizeof(struct vmop_create_params));
+
+	for (i = 0; i < vcp->vcp_nnics; i++) {
+		proc_compose_imsg(ps, PROC_VMM, -1,
+		    IMSG_VMDOP_START_VM_IF, vm->vm_vmid, tapfds[i],
+		    &i, sizeof(i));
+	}
 
 	free(diskfds);
 	free(tapfds);
@@ -616,7 +613,6 @@ config_getif(struct privsep *ps, struct imsg *imsg)
 		goto fail;
 	}
 	vm->vm_ifs[n].vif_fd = imsg->fd;
-
 	return (0);
  fail:
 	if (imsg->fd != -1)

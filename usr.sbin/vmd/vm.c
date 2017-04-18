@@ -73,7 +73,7 @@ void create_memory_map(struct vm_create_params *);
 int alloc_guest_mem(struct vm_create_params *);
 int vmm_create_vm(struct vm_create_params *);
 void init_emulated_hw(struct vmop_create_params *, int *, int *);
-void restore_emulated_hw(struct vm_create_params *, FILE *fp);
+void restore_emulated_hw(struct vm_create_params *, FILE *fp, int *);
 void vcpu_exit_inout(struct vm_run_params *);
 uint8_t vcpu_exit_pci(struct vm_run_params *);
 int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
@@ -261,7 +261,7 @@ start_vm(struct vmd_vm *vm, int fd)
 	setproctitle("%s", vcp->vcp_name);
 	log_procinit(vcp->vcp_name);
 
-	log_info(">>>>> vm_received: %d", vm->vm_received);
+	log_info("--->>>>> vm_received: %d", vm->vm_received);
 	create_memory_map(vcp);
 	ret = alloc_guest_mem(vcp);
 	if (ret) {
@@ -352,14 +352,10 @@ receive_vm(struct vmd_vm *vm, int recv_fd, int fd) {
 	FILE *recvfp;
 	/* Child */
 
-	log_info("Look ma. I am here %p", vm);
-	log_info("Getting vrp: %lu", sizeof(vrp));
 	ret = read(recv_fd, &vrp, sizeof(vrp));
 	if (ret != sizeof(vrp)) {
 		log_info("Incomplete vrp %d", ret);
 	}
-	log_info("Here RAX: %llu", vrp.vrwp_regs.vrs_gprs[VCPU_REGS_RAX]);
-	log_info("Here RIP: %llu", vrp.vrwp_regs.vrs_gprs[VCPU_REGS_RIP]);
 	setproctitle("%s", vcp->vcp_name);
 	log_procinit(vcp->vcp_name);
 
@@ -409,20 +405,21 @@ receive_vm(struct vmd_vm *vm, int recv_fd, int fd) {
 
 	recvfp = fdopen(recv_fd, "r");
 
-	restore_emulated_hw(vcp, recvfp);
+	for (i = 0; i < VMM_MAX_NICS_PER_VM; i++)
+		nicfds[i] = vm->vm_ifs[i].vif_fd;
+
+	restore_emulated_hw(vcp, recvfp, nicfds);
 
 	for (i = 0; i < vcp->vcp_nmemranges; i++) {
 		vmr = &vcp->vcp_memranges[i];
-		log_info("reading from fd %zu\n", vmr->vmr_size);
+		/* log_info("reading from fd %zu\n", vmr->vmr_size); */
 		mread(recvfp, vmr->vmr_gpa, vmr->vmr_size);
 	}
 
 	if (vmm_pipe(vm, fd, vm_dispatch_vmm) == -1)
 		fatal("setup vm pipe");
 
-	log_info("Should run now");
 	/* Execute the vcpu run loop(s) for this VM */
-	sleep(5);
 	ret = run_vm(vm->vm_disks, nicfds, &vm->vm_params, &vrs);
 
 	return (ret);
@@ -561,7 +558,7 @@ void send_vm(int fd, struct vm_create_params *vcp) {
 
 	vmc = calloc(1, sizeof(struct vmop_create_params));
 	flags |= VMOP_CREATE_MEMORY;
-	memcpy(&vmc->vmc_params, vcp, sizeof(struct vm_create_params));
+	memcpy(&vmc->vmc_params, &current_vm->vm_params, sizeof(struct vmop_create_params));
 	vmc->vmc_flags = flags;
 
 	log_info("paaaausing");
@@ -920,7 +917,7 @@ init_emulated_hw(struct vmop_create_params *vmc, int *child_disks,
  * Restores the userspace hardware emulation from fd
  */
 void
-restore_emulated_hw(struct vm_create_params *vcp, FILE *fp)
+restore_emulated_hw(struct vm_create_params *vcp, FILE *fp, int *child_taps)
 {
 	/* struct vm_create_params *vcp = &vmc->vmc_params; */
 	int i;
@@ -960,7 +957,8 @@ restore_emulated_hw(struct vm_create_params *vcp, FILE *fp)
 	ioports_map[PCI_MODE1_DATA_REG + 2] = vcpu_exit_pci;
 	ioports_map[PCI_MODE1_DATA_REG + 3] = vcpu_exit_pci;
 	pci_restore(fp);
-	virtio_restore(fp, vcp, NULL, NULL);
+	pci_init();
+	virtio_restore(fp, vcp, NULL, child_taps);
 	hardware_initialized = 1;
 
 }
@@ -1803,12 +1801,12 @@ void dump_regs(struct vcpu_reg_state *vrs) {
 	/* log_info("VCPU_REGS_IDTR   : vsi_base=0x%016llx vsi_limit=0x%u vsi_sel=0x%d ", vrs->vrs_idtr.vsi_base, vrs->vrs_idtr.vsi_limit, vrs->vrs_idtr.vsi_sel); */
 
 
-	log_info("VCPU_REGS_EFER   	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_EFER]);
-	log_info("VCPU_REGS_STAR   	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_STAR]);
-	log_info("VCPU_REGS_LSTAR  	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_LSTAR]);
-	log_info("VCPU_REGS_CSTAR  	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_CSTAR]);
-	log_info("VCPU_REGS_SFMASK 	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_SFMASK]);
-	log_info("VCPU_REGS_KGSBASE	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_KGSBASE]);
+	/* log_info("VCPU_REGS_EFER   	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_EFER]); */
+	/* log_info("VCPU_REGS_STAR   	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_STAR]); */
+	/* log_info("VCPU_REGS_LSTAR  	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_LSTAR]); */
+	/* log_info("VCPU_REGS_CSTAR  	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_CSTAR]); */
+	/* log_info("VCPU_REGS_SFMASK 	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_SFMASK]); */
+	/* log_info("VCPU_REGS_KGSBASE	   : 0x%016llx", vrs->vrs_msrs[VCPU_REGS_KGSBASE]); */
 }
 
 /*
