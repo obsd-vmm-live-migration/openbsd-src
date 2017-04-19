@@ -189,6 +189,7 @@ config_setvm(struct privsep *ps, struct vmd_vm *vm, uint32_t peerid, uid_t uid)
 
 	/* Open disk images for child */
 	for (i = 0 ; i < vcp->vcp_ndisks; i++) {
+		log_info("disk: %s", vcp->vcp_disks[i]);
 		if ((diskfds[i] =
 		    open(vcp->vcp_disks[i], O_RDWR)) == -1) {
 			log_warn("%s: can't open disk %s", __func__,
@@ -458,14 +459,15 @@ config_set_receivedvm(struct privsep *ps, struct vmd_vm *vm, uint32_t peerid, ui
 	/* proc_compose_imsg(ps, PROC_VMM, -1, */
 	/*     IMSG_VMDOP_START_VM_REQUEST, vm->vm_vmid, kernfd, */
 	/*     vmc, sizeof(*vmc)); */
-	/* for (i = 0; i < vcp->vcp_ndisks; i++) { */
-	/* 	proc_compose_imsg(ps, PROC_VMM, -1, */
-	/* 	    IMSG_VMDOP_START_VM_DISK, vm->vm_vmid, diskfds[i], */
-	/* 	    &i, sizeof(i)); */
-	/* } */
 
 	proc_compose_imsg(ps, PROC_VMM, -1,
 	    IMSG_VMDOP_RECEIVE_VM, vm->vm_vmid, fd,  vmc, sizeof(struct vmop_create_params));
+
+	for (i = 0; i < vcp->vcp_ndisks; i++) {
+		proc_compose_imsg(ps, PROC_VMM, -1,
+		    IMSG_VMDOP_START_VM_DISK, vm->vm_vmid, diskfds[i],
+		    &i, sizeof(i));
+	}
 
 	for (i = 0; i < vcp->vcp_nnics; i++) {
 		proc_compose_imsg(ps, PROC_VMM, -1,

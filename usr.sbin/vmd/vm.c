@@ -73,7 +73,7 @@ void create_memory_map(struct vm_create_params *);
 int alloc_guest_mem(struct vm_create_params *);
 int vmm_create_vm(struct vm_create_params *);
 void init_emulated_hw(struct vmop_create_params *, int *, int *);
-void restore_emulated_hw(struct vm_create_params *, FILE *fp, int *);
+void restore_emulated_hw(struct vm_create_params *, FILE *fp, int *, int *);
 void vcpu_exit_inout(struct vm_run_params *);
 uint8_t vcpu_exit_pci(struct vm_run_params *);
 int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
@@ -408,7 +408,7 @@ receive_vm(struct vmd_vm *vm, int recv_fd, int fd) {
 	for (i = 0; i < VMM_MAX_NICS_PER_VM; i++)
 		nicfds[i] = vm->vm_ifs[i].vif_fd;
 
-	restore_emulated_hw(vcp, recvfp, nicfds);
+	restore_emulated_hw(vcp, recvfp, nicfds, vm->vm_disks);
 
 	for (i = 0; i < vcp->vcp_nmemranges; i++) {
 		vmr = &vcp->vcp_memranges[i];
@@ -548,6 +548,7 @@ void send_vm(int fd, struct vm_create_params *vcp) {
 	struct vm_mem_range *vmr;
 	struct vm_rwregs_params vrp;
 	struct vmop_create_params *vmc;
+	struct vm_terminate_params vtp;
 	unsigned int flags = 0;
 
 
@@ -600,8 +601,12 @@ void send_vm(int fd, struct vm_create_params *vcp) {
 		log_info("writing to fd %zu\n", vmr->vmr_size);
 		mwrite(fd, vmr);
 	}
-	unpause_vm(vcp);
+	/* unpause_vm(vcp); */
 	close(fd);
+	vtp.vtp_vm_id = vcp->vcp_id;
+	if (ioctl(env->vmd_fd, VMM_IOC_TERM, &vtp) < 0) {
+		log_info ("term IOC error: %d, %d", errno, ENOENT);
+	}
 	log_info("DONE!");
 }
 
@@ -916,7 +921,7 @@ init_emulated_hw(struct vmop_create_params *vmc, int *child_disks,
  * Restores the userspace hardware emulation from fd
  */
 void
-restore_emulated_hw(struct vm_create_params *vcp, FILE *fp, int *child_taps)
+restore_emulated_hw(struct vm_create_params *vcp, FILE *fp, int *child_taps, int *child_disks)
 {
 	/* struct vm_create_params *vcp = &vmc->vmc_params; */
 	int i;
@@ -956,7 +961,7 @@ restore_emulated_hw(struct vm_create_params *vcp, FILE *fp, int *child_taps)
 	ioports_map[PCI_MODE1_DATA_REG + 2] = vcpu_exit_pci;
 	ioports_map[PCI_MODE1_DATA_REG + 3] = vcpu_exit_pci;
 	pci_init();
-	virtio_restore(fp, vcp, NULL, child_taps);
+	virtio_restore(fp, vcp, child_disks, child_taps);
 	hardware_initialized = 1;
 
 }

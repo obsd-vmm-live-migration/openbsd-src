@@ -52,6 +52,7 @@ struct vionet_dev *vionet;
 struct vmmci_dev vmmci;
 
 int nr_vionet;
+int nr_vioblk;
 
 #define MAXPHYS	(64 * 1024)	/* max raw I/O transfer size */
 
@@ -663,7 +664,6 @@ virtio_blk_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 	struct vioblk_dev *dev = (struct vioblk_dev *)cookie;
 
 	*intr = 0xFF;
-
 
 	if (dir == 0) {
 		switch (reg) {
@@ -1618,6 +1618,7 @@ virtio_init(struct vmop_create_params *vmc, int *child_disks, int *child_taps)
 	    + sizeof(uint16_t) * (2 + VIORND_QUEUE_SIZE));
 
 	if (vcp->vcp_ndisks > 0) {
+		nr_vioblk = vcp->vcp_ndisks;
 		vioblk = calloc(vcp->vcp_ndisks, sizeof(struct vioblk_dev));
 		if (vioblk == NULL) {
 			log_warn("%s: calloc failure allocating vioblks",
@@ -1812,7 +1813,23 @@ vmmci_restore(FILE *fp, uint32_t vm_id) {
 void
 viornd_restore(FILE *fp) {
 	int ret;
+	uint8_t id;
 	ret = fread(&viornd, 1, sizeof(viornd), fp);
+	if (pci_add_device(&id, PCI_VENDOR_QUMRANET,
+	    PCI_PRODUCT_QUMRANET_VIO_RNG, PCI_CLASS_SYSTEM,
+	    PCI_SUBCLASS_SYSTEM_MISC,
+	    PCI_VENDOR_OPENBSD,
+	    PCI_PRODUCT_VIRTIO_ENTROPY, 1, NULL)) {
+		log_warnx("%s: can't add PCI virtio rng device",
+		    __progname);
+		return;
+	}
+
+	if (pci_add_bar(id, PCI_MAPREG_TYPE_IO, virtio_rnd_io, NULL)) {
+		log_warnx("%s: can't add bar for virtio rng device",
+		    __progname);
+		return;
+	}
 	log_info("restore viornd %d", ret);
 }
 
@@ -1831,7 +1848,6 @@ vionet_restore(FILE *fp, struct vm_create_params *vcp, int *child_taps) {
 		}
 		ret = fread(vionet, vcp->vcp_nnics, sizeof(struct vionet_dev), fp);
 		log_info("restore vionet %d", ret);
-		log_info("vio%s", ether_ntoa((void *)vionet[0].mac));
 
 		/* vionet = calloc(vcp->vcp_nnics, sizeof(struct vionet_dev)); */
 
@@ -1846,6 +1862,7 @@ vionet_restore(FILE *fp, struct vm_create_params *vcp, int *child_taps) {
 				    __progname);
 				return;
 			}
+			log_info("vioblk id: %d", id);
 
 			if (pci_add_bar(id, PCI_MAPREG_TYPE_IO, virtio_net_io,
 			    &vionet[i])) {
@@ -1879,11 +1896,48 @@ vionet_restore(FILE *fp, struct vm_create_params *vcp, int *child_taps) {
 	}
 }
 
+void 
+vioblk_restore(FILE *fp, struct vm_create_params *vcp, int *child_disks) {
+	int i, ret;
+	size_t sz;
+	uint8_t id;
+
+	nr_vioblk = vcp->vcp_ndisks;
+	vioblk = calloc(vcp->vcp_ndisks, sizeof(struct vioblk_dev));
+	ret = fread(vioblk, nr_vioblk, sizeof(struct vioblk_dev), fp);
+	log_info("restore vioblk %d", ret);
+	for (i = 0; i < vcp->vcp_ndisks; i++) {
+		if ((sz = lseek(child_disks[i], 0, SEEK_END)) == -1)
+			continue;
+
+		if (pci_add_device(&id, PCI_VENDOR_QUMRANET,
+					PCI_PRODUCT_QUMRANET_VIO_BLOCK,
+					PCI_CLASS_MASS_STORAGE,
+					PCI_SUBCLASS_MASS_STORAGE_SCSI,
+					PCI_VENDOR_OPENBSD,
+					PCI_PRODUCT_VIRTIO_BLOCK, 1, NULL)) {
+			log_warnx("%s: can't add PCI virtio block "
+					"device", __progname);
+			return;
+		}
+		log_info("vioblk id: %d", id);
+		if (pci_add_bar(id, PCI_MAPREG_TYPE_IO, virtio_blk_io,
+					&vioblk[i])) {
+			log_warnx("%s: can't add bar for virtio block "
+					"device", __progname);
+			return;
+		}
+		vioblk[i].fd = child_disks[i];
+		log_info("setting fd %d", child_disks[i]);
+	}
+}
+
 void
 virtio_restore(FILE *fp, struct vm_create_params *vcp, int *child_disks, int *child_taps) {
-	vmmci_restore(fp, vcp->vcp_id);
 	viornd_restore(fp);
+	vioblk_restore(fp, vcp, child_disks);
 	vionet_restore(fp, vcp, child_taps);
+	vmmci_restore(fp, vcp->vcp_id);
 }
 
 void
@@ -1905,9 +1959,15 @@ vionet_dump(int fd) {
 	log_info("vionet dump %d", ret);
 }
 
-void virtio_dump(int fd) {
-	vmmci_dump(fd);
-	viornd_dump(fd);
-	vionet_dump(fd);
+void vioblk_dump(int fd) {
+	int ret;
+	ret = write(fd, vioblk, nr_vioblk * sizeof(struct vioblk_dev));
+	log_info("vioblk dump %d", ret);
 }
 
+void virtio_dump(int fd) {
+	viornd_dump(fd);
+	vioblk_dump(fd);
+	vionet_dump(fd);
+	vmmci_dump(fd);
+}
