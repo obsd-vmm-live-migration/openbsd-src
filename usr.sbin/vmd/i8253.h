@@ -44,5 +44,8 @@ struct i8253_channel {
 void i8253_init(uint32_t);
 void i8253_reset(uint8_t);
 void i8253_fire(int, short, void *);
+void i8253_dump(int);
+void i8253_restore(FILE *, uint32_t);
 uint8_t vcpu_exit_i8253(struct vm_run_params *);
 void i8253_do_readback(uint32_t);
+void i8253_stop(void);

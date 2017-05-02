@@ -22,6 +22,7 @@
 #include <machine/vmmvar.h>
 
 #include <errno.h>
+#include <stdio.h>
 #include <event.h>
 #include <pthread.h>
 #include <string.h>
@@ -483,4 +484,32 @@ vcpu_exit_com(struct vm_run_params *vrp)
 
 	mutex_unlock(&com1_dev.mutex);
 	return (intr);
+}
+
+void
+ns8250_dump(int fd) {
+	int ret;
+	ret = write(fd, &com1_dev.regs, sizeof(com1_dev.regs));
+	log_debug("Sending UART");
+}
+
+
+void
+ns8250_restore(FILE *fp, int con_fd, uint32_t vmid) {
+	int ret;
+	ret = fread(&com1_dev.regs, 1, sizeof(com1_dev.regs), fp);
+
+	ret = pthread_mutex_init(&com1_dev.mutex, NULL);
+	if (ret) {
+		errno = ret;
+		fatal("could not initialize com1 mutex");
+	}
+	com1_dev.fd = con_fd;
+	com1_dev.irq = 4;
+	com1_dev.rcv_pending = 0;
+
+	event_set(&com1_dev.event, com1_dev.fd, EV_READ | EV_PERSIST,
+	    com_rcv_event, (void *)(intptr_t)vmid);
+	event_add(&com1_dev.event, NULL);
+	log_debug("Receiving UART");
 }

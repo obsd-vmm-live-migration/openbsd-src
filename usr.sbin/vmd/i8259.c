@@ -23,6 +23,8 @@
 
 #include <machine/vmmvar.h>
 
+#include <unistd.h>
+#include <stdio.h>
 #include "proc.h"
 #include "i8259.h"
 #include "vmm.h"
@@ -647,3 +649,19 @@ vcpu_exit_i8259(struct vm_run_params *vrp)
 
 	return (0xFF);
 }
+
+void
+i8259_dump(int fd) {
+	int ret;
+	ret = write(fd, &pics, sizeof(pics));
+	log_debug("Sending PIC");
+}
+
+
+void
+i8259_restore(FILE *fp) {
+	int ret;
+	ret = fread(&pics, 1,  sizeof(pics), fp);
+	log_debug("Receiving PIC");
+}
+

@@ -65,6 +65,13 @@ enum imsg_type {
 	IMSG_VMDOP_START_VM_IF,
 	IMSG_VMDOP_START_VM_END,
 	IMSG_VMDOP_START_VM_RESPONSE,
+	IMSG_VMDOP_PAUSE_VM,
+	IMSG_VMDOP_PAUSE_VM_RESPONSE,
+	IMSG_VMDOP_UNPAUSE_VM,
+	IMSG_VMDOP_UNPAUSE_VM_RESPONSE,
+	IMSG_VMDOP_SEND_VM,
+	IMSG_VMDOP_RECEIVE_VM,
+	IMSG_VMDOP_RECEIVE_VM_END,
 	IMSG_VMDOP_TERMINATE_VM_REQUEST,
 	IMSG_VMDOP_TERMINATE_VM_RESPONSE,
 	IMSG_VMDOP_TERMINATE_VM_EVENT,
@@ -184,6 +191,7 @@ struct vmd_vm {
 	struct imsgev		 vm_iev;
 	int			 vm_shutdown;
 	uid_t			 vm_uid;
+	int			vm_received;
 
 	TAILQ_ENTRY(vmd_vm)	 vm_entry;
 };
@@ -294,6 +302,7 @@ int	 vmm_pipe(struct vmd_vm *, int, void (*)(int, short, void *));
 
 /* vm.c */
 int	 start_vm(struct vmd_vm *, int);
+int receive_vm(struct vmd_vm *, int, int);
 __dead void vm_shutdown(unsigned int);
 
 /* control.c */
@@ -304,6 +313,7 @@ int	 config_getconfig(struct vmd *, struct imsg *);
 int	 config_setreset(struct vmd *, unsigned int);
 int	 config_getreset(struct vmd *, struct imsg *);
 int	 config_setvm(struct privsep *, struct vmd_vm *, uint32_t, uid_t);
+int	 config_set_receivedvm(struct privsep *, struct vmd_vm *, uint32_t, uid_t);
 int	 config_getvm(struct privsep *, struct imsg *);
 int	 config_getdisk(struct privsep *, struct imsg *);
 int	 config_getif(struct privsep *, struct imsg *);

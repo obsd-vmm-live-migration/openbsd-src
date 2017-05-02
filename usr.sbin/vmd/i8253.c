@@ -25,12 +25,18 @@
 #include <event.h>
 #include <string.h>
 #include <stddef.h>
+#include <unistd.h>
+#include <stdio.h>
 
 #include "i8253.h"
+#include "i8259.h"
 #include "proc.h"
+#include "vmm.h"
 #include "vmm.h"
 
 extern char *__progname;
+uint32_t vmid;
+int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
 
 /*
  * Channel 0 is used to generate the legacy hardclock interrupt (HZ).
@@ -52,6 +58,7 @@ i8253_init(uint32_t vm_id)
 {
 	memset(&i8253_channel, 0, sizeof(struct i8253_channel));
 	gettimeofday(&i8253_channel[0].tv, NULL);
+	vmid = vm_id;
 	i8253_channel[0].start = 0xFFFF;
 	i8253_channel[0].mode = TIMER_INTTC;
 	i8253_channel[0].last_r = 1;
@@ -335,9 +342,42 @@ i8253_fire(int fd, short type, void *arg)
 
 	timerclear(&tv);
 	tv.tv_usec = (ctr->start * NS_PER_TICK) / 1000;
-
 	vcpu_assert_pic_irq(ctr->vm_id, 0, 0);
 
 	if (ctr->mode != TIMER_INTTC)
 		evtimer_add(&ctr->timer, &tv);
+}
+
+void
+i8253_dump(int fd) {
+	int ret;
+	ret = write(fd, &i8253_channel, sizeof(i8253_channel));
+	log_debug("Sending PIT");
+}
+
+
+void
+i8253_restore(FILE *fp, uint32_t vm_id) {
+	int ret;
+	
+	ret = fread(&i8253_channel, 1, sizeof(i8253_channel), fp);
+	memset(&i8253_channel[0].timer, 0, sizeof(struct event));
+	memset(&i8253_channel[1].timer, 0, sizeof(struct event));
+	memset(&i8253_channel[2].timer, 0, sizeof(struct event));
+	i8253_channel[0].vm_id = vm_id;
+	i8253_channel[1].vm_id = vm_id;
+	i8253_channel[2].vm_id = vm_id;
+
+	evtimer_set(&i8253_channel[0].timer, i8253_fire, &i8253_channel[0]);
+	evtimer_set(&i8253_channel[1].timer, i8253_fire, &i8253_channel[1]);
+	evtimer_set(&i8253_channel[2].timer, i8253_fire, &i8253_channel[2]);
+	i8253_reset(0);
+	log_debug("Receiving PIT");
+}
+
+void
+i8253_stop() {
+	evtimer_del(&i8253_channel[0].timer);
+	evtimer_del(&i8253_channel[1].timer);
+	evtimer_del(&i8253_channel[2].timer);
 }

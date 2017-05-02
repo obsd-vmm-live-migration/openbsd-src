@@ -23,7 +23,9 @@
 #include <dev/pv/virtioreg.h>
 #include <machine/vmmvar.h>
 
+#include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include "vmd.h"
 #include "pci.h"
 #include "vmm.h"

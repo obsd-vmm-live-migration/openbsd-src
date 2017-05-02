@@ -26,6 +26,8 @@
 #include <stddef.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <stdio.h>
 
 #include "vmd.h"
 #include "mc146818.h"
@@ -60,7 +62,9 @@ struct mc146818 {
 };
 
 struct mc146818 rtc;
+uint32_t vmid;
 
+int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
 /*
  * rtc_updateregs
  *
@@ -95,7 +99,7 @@ rtc_updateregs(void)
  *  type: unused
  *  arg: unused
  */
-static void
+void
 rtc_fire1(int fd, short type, void *arg)
 {
 	time_t old = rtc.now;
@@ -121,13 +125,11 @@ rtc_fire1(int fd, short type, void *arg)
  *  type: unused
  *  arg: (as uint32_t), VM ID to which this RTC belongs
  */
-static void
+void
 rtc_fireper(int fd, short type, void *arg)
 {
 	rtc.regs[MC_REGC] |= MC_REGC_PF;
-
 	vcpu_assert_pic_irq((ptrdiff_t)arg, 0, 8);
-
 	evtimer_add(&rtc.per, &rtc.per_tv);
 }
 
@@ -146,6 +148,7 @@ mc146818_init(uint32_t vm_id, uint64_t memlo, uint64_t memhi)
 {
 	memset(&rtc, 0, sizeof(rtc));
 	time(&rtc.now);
+	vmid = vm_id;
 
 	rtc.regs[MC_REGB] = MC_REGB_24HR;
 
@@ -312,4 +315,33 @@ vcpu_exit_mc146818(struct vm_run_params *vrp)
 	}
 
 	return 0xFF;
+}
+
+void
+mc146818_dump(int fd) {
+	int ret;
+	ret = write(fd, &rtc, sizeof(rtc));
+	log_debug("Sending RTC");
+}
+
+void
+mc146818_restore(FILE *fp, uint32_t vm_id) {
+	int ret;
+	ret = fread(&rtc,1, sizeof(rtc), fp);
+	rtc.vm_id = vm_id;
+
+	memset(&rtc.sec, 0, sizeof(struct event));
+	memset(&rtc.per, 0, sizeof(struct event));
+	evtimer_set(&rtc.sec, rtc_fire1, NULL);
+	evtimer_set(&rtc.per, rtc_fireper, (void *)(intptr_t)rtc.vm_id);
+
+	evtimer_add(&rtc.per, &rtc.per_tv);
+	evtimer_add(&rtc.sec, &rtc.sec_tv);
+	log_debug("Receiving RTC");
+}
+
+void
+mc146818_stop() {
+	evtimer_del(&rtc.per);
+	evtimer_del(&rtc.sec);
 }
