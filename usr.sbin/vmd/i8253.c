@@ -32,10 +32,8 @@
 #include "i8259.h"
 #include "proc.h"
 #include "vmm.h"
-#include "vmm.h"
 
 extern char *__progname;
-uint32_t vmid;
 int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
 
 /*
@@ -58,7 +56,6 @@ i8253_init(uint32_t vm_id)
 {
 	memset(&i8253_channel, 0, sizeof(struct i8253_channel));
 	gettimeofday(&i8253_channel[0].tv, NULL);
-	vmid = vm_id;
 	i8253_channel[0].start = 0xFFFF;
 	i8253_channel[0].mode = TIMER_INTTC;
 	i8253_channel[0].last_r = 1;

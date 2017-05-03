@@ -159,7 +159,7 @@ parse(int argc, char *argv[])
 
 	if (!ctl->has_pledge) {
 		/* pledge(2) default if command doesn't have its own pledge */
-		if (pledge("stdio rpath exec unix getpw sendfd", NULL) == -1)
+		if (pledge("stdio rpath exec unix getpw sendfd recvfd", NULL) == -1)
 			err(1, "pledge");
 	}
 	if (ctl->main(&res, argc, argv) != 0)
@@ -237,7 +237,6 @@ vmmaction(struct parse_result *res)
 		    &res->mode, sizeof(res->mode));
 		done = 1;
 		break;
-	case CMD_CREATE:
 	case CMD_PAUSE:
 		pause_vm(res->id, res->name);
 		break;
@@ -246,12 +245,12 @@ vmmaction(struct parse_result *res)
 		break;
 	case CMD_SEND:
 		send_vm(res->id, res->name);
-		done = 1;
 		break;
 	case CMD_RECEIVE:
 		recv_vm(res->id, res->name);
 		done = 1;
 		break;
+	case CMD_CREATE:
 	case NONE:
 		break;
 	}
@@ -302,6 +301,9 @@ vmmaction(struct parse_result *res)
 				break;
 			case CMD_PAUSE:
 				done = pause_vm_complete(&imsg, &ret);
+				break;
+			case CMD_SEND:
+				done = send_vm_complete(&imsg, &ret);
 				break;
 			case CMD_UNPAUSE:
 				done = unpause_vm_complete(&imsg, &ret);

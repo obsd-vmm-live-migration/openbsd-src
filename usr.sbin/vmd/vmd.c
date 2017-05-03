@@ -69,7 +69,7 @@ int
 vmd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
 	struct privsep			*ps = p->p_ps;
-	int				 res = 0, ret = 0, cmd = 0, verbose;
+	int				 res = 0, ret = 0, cmd = 0, verbose, fds[2];
 	unsigned int			 v = 0;
 	struct vmop_create_params	 vmc;
 	struct vmop_id			 vid;
@@ -159,16 +159,27 @@ vmd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 		proc_compose_imsg(ps, PROC_VMM, -1, imsg->hdr.type,
 				imsg->hdr.peerid, -1, imsg->data, IMSG_DATA_SIZE(imsg));
 		break;
-	case IMSG_VMDOP_SEND_VM:
-		proc_compose_imsg(ps, PROC_VMM, -1, imsg->hdr.type,
-				imsg->hdr.peerid, imsg->fd, imsg->data, IMSG_DATA_SIZE(imsg));
+	case IMSG_VMDOP_SEND_VM_REQUEST:
+		IMSG_SIZE_CHECK(imsg, &vid);
+		memcpy(&vid, imsg->data, sizeof(vid));
+		vmr.vmr_id = vid.vid_id;
+		if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, fds) == -1) {
+			res = errno;
+			log_debug("%s: socketpair creation failed", __func__);
+		} else {
+			log_debug("%s: sending fd to vmctl", __func__);
+			proc_compose_imsg(ps, PROC_CONTROL, -1, IMSG_VMDOP_SEND_VM_RESPONSE,
+			    imsg->hdr.peerid, fds[0], &vmr, sizeof(vmr));
+			proc_compose_imsg(ps, PROC_VMM, -1, imsg->hdr.type,
+			    imsg->hdr.peerid, fds[1], imsg->data, IMSG_DATA_SIZE(imsg));
+		}
 		break;
 	case IMSG_VMDOP_RECEIVE_VM:
 		IMSG_SIZE_CHECK(imsg, &vid);
 		memcpy(&vid, imsg->data, sizeof(vid));
 		ret = read(imsg->fd, &vmc, sizeof(struct vmop_create_params));
 		if (ret != sizeof(vmc)) {
-			log_info("Incomplete vmc %d", ret);
+			log_info("%s: incomplete vmc", __func__);
 		}
 		strlcpy(vmc.vmc_params.vcp_name, vid.vid_name, sizeof(vmc.vmc_params.vcp_name));
 		vmc.vmc_params.vcp_id = 0;

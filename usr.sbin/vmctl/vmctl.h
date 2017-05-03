@@ -90,6 +90,7 @@ void	 pause_vm(uint32_t, const char *);
 int	 pause_vm_complete(struct imsg *, int *);
 void	 unpause_vm(uint32_t, const char *);
 void	 send_vm(uint32_t, const char *);
+int	 send_vm_complete(struct imsg *, int *);
 void	 recv_vm(uint32_t, const char *);
 int	 unpause_vm_complete(struct imsg *, int *);
 int	 check_info_id(const char *, uint32_t);

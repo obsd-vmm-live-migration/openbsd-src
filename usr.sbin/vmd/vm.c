@@ -299,7 +299,7 @@ start_vm(struct vmd_vm *vm, int fd)
 	 * recvfd - for send/recv.
 	 * vmm - for the vmm ioctls and operations.
 	 */
-	if (pledge("stdio vmm recvfd cpath wpath flock", NULL) == -1)
+	if (pledge("stdio vmm recvfd", NULL) == -1)
 		fatal("pledge");
 
 	/*
@@ -498,7 +498,7 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 				IMSG_VMDOP_UNPAUSE_VM_RESPONSE, imsg.hdr.peerid, imsg.hdr.pid,
 				-1, &vmr, sizeof(vmr));
 			break;
-		case IMSG_VMDOP_SEND_VM:
+		case IMSG_VMDOP_SEND_VM_REQUEST:
 			vmr.vmr_result = 0;
 			vmr.vmr_id = vm->vm_params.vmc_params.vcp_id;
 			send_vm(imsg.fd, &vm->vm_params.vmc_params);

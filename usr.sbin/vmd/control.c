@@ -84,6 +84,7 @@ control_dispatch_vmd(int fd, struct privsep_proc *p, struct imsg *imsg)
 	switch (imsg->hdr.type) {
 	case IMSG_VMDOP_START_VM_RESPONSE:
 	case IMSG_VMDOP_PAUSE_VM_RESPONSE:
+	case IMSG_VMDOP_SEND_VM_RESPONSE:
 	case IMSG_VMDOP_UNPAUSE_VM_RESPONSE:
 	case IMSG_VMDOP_TERMINATE_VM_RESPONSE:
 	case IMSG_VMDOP_GET_INFO_VM_DATA:
@@ -94,7 +95,7 @@ control_dispatch_vmd(int fd, struct privsep_proc *p, struct imsg *imsg)
 			return (0);
 		}
 		imsg_compose_event(&c->iev, imsg->hdr.type,
-		    0, 0, -1, imsg->data, IMSG_DATA_SIZE(imsg));
+		    0, 0, imsg->fd, imsg->data, IMSG_DATA_SIZE(imsg));
 		break;
 	case IMSG_VMDOP_CONFIG:
 		config_getconfig(ps->ps_env, imsg);
@@ -401,7 +402,6 @@ control_dispatch_imsg(int fd, short event, void *arg)
 				return;
 			}
 			break;
-		case IMSG_VMDOP_SEND_VM:
 		case IMSG_VMDOP_RECEIVE_VM:
 			if (proc_compose_imsg(ps, PROC_PARENT, -1,
 			    imsg.hdr.type, imsg.hdr.peerid, imsg.fd,
@@ -410,9 +410,9 @@ control_dispatch_imsg(int fd, short event, void *arg)
 				return;
 			}
 			break;
+		case IMSG_VMDOP_SEND_VM_REQUEST:
 		case IMSG_VMDOP_PAUSE_VM:
 		case IMSG_VMDOP_UNPAUSE_VM:
-			// TODO: Dedup this code
 			if (proc_compose_imsg(ps, PROC_PARENT, -1,
 			    imsg.hdr.type, fd, imsg.fd,
 			    imsg.data, IMSG_DATA_SIZE(&imsg)) == -1) {

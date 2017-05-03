@@ -213,7 +213,7 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		break;
 	case IMSG_VMDOP_PAUSE_VM:
 	case IMSG_VMDOP_UNPAUSE_VM:
-	case IMSG_VMDOP_SEND_VM:
+	case IMSG_VMDOP_SEND_VM_REQUEST:
 		IMSG_SIZE_CHECK(imsg, &vid);
 		memcpy(&vid, imsg->data, sizeof(vid));
 		id = vid.vid_id;
