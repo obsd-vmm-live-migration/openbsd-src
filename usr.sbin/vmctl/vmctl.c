@@ -221,7 +221,6 @@ send_vm_complete(struct imsg *imsg, int *ret)
 
 	if (imsg->hdr.type == IMSG_VMDOP_SEND_VM_RESPONSE) {
 		vmr = (struct vmop_result *)imsg->data;
-		warnx("asdf %d %d", 55, vmr->vmr_id);
 		fd = imsg->fd;
 		if (fd < 0) {
 			warn("send vm command failed %d", fd);

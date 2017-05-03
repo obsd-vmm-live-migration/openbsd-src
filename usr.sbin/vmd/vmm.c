@@ -93,9 +93,8 @@ vmm_run(struct privsep *ps, struct privsep_proc *p, void *arg)
 	 * proc - for forking and maitaining vms.
 	 * send - for sending send/recv fds to vm proc.
 	 * recvfd - for disks, interfaces and other fds.
-	 * (TODO: Pratik - add comments for flock wpath cpath)
 	 */
-	if (pledge("stdio vmm sendfd recvfd proc flock wpath cpath", NULL) == -1)
+	if (pledge("stdio vmm sendfd recvfd proc", NULL) == -1)
 		fatal("pledge");
 
 	/* Get and terminate all running VMs */
