@@ -490,7 +490,7 @@ void
 ns8250_dump(int fd) {
 	int ret;
 	ret = write(fd, &com1_dev.regs, sizeof(com1_dev.regs));
-	log_debug("Sending UART");
+	log_debug("%s: Sending UART", __func__);
 }
 
 
@@ -511,5 +511,5 @@ ns8250_restore(FILE *fp, int con_fd, uint32_t vmid) {
 	event_set(&com1_dev.event, com1_dev.fd, EV_READ | EV_PERSIST,
 	    com_rcv_event, (void *)(intptr_t)vmid);
 	event_add(&com1_dev.event, NULL);
-	log_debug("Receiving UART");
+	log_debug("%s: Receiving UART", __func__);
 }

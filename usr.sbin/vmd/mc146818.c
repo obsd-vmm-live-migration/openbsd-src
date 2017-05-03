@@ -62,9 +62,7 @@ struct mc146818 {
 };
 
 struct mc146818 rtc;
-uint32_t vmid;
 
-int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
 /*
  * rtc_updateregs
  *
@@ -99,7 +97,7 @@ rtc_updateregs(void)
  *  type: unused
  *  arg: unused
  */
-void
+static void
 rtc_fire1(int fd, short type, void *arg)
 {
 	time_t old = rtc.now;
@@ -125,7 +123,7 @@ rtc_fire1(int fd, short type, void *arg)
  *  type: unused
  *  arg: (as uint32_t), VM ID to which this RTC belongs
  */
-void
+static void
 rtc_fireper(int fd, short type, void *arg)
 {
 	rtc.regs[MC_REGC] |= MC_REGC_PF;
@@ -148,7 +146,6 @@ mc146818_init(uint32_t vm_id, uint64_t memlo, uint64_t memhi)
 {
 	memset(&rtc, 0, sizeof(rtc));
 	time(&rtc.now);
-	vmid = vm_id;
 
 	rtc.regs[MC_REGB] = MC_REGB_24HR;
 
@@ -321,7 +318,7 @@ void
 mc146818_dump(int fd) {
 	int ret;
 	ret = write(fd, &rtc, sizeof(rtc));
-	log_debug("Sending RTC");
+	log_debug("%s: Sending RTC", __func__);
 }
 
 void
@@ -337,7 +334,7 @@ mc146818_restore(FILE *fp, uint32_t vm_id) {
 
 	evtimer_add(&rtc.per, &rtc.per_tv);
 	evtimer_add(&rtc.sec, &rtc.sec_tv);
-	log_debug("Receiving RTC");
+	log_debug("%s: Receiving RTC", __func__);
 }
 
 void

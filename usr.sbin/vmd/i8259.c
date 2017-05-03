@@ -654,7 +654,7 @@ void
 i8259_dump(int fd) {
 	int ret;
 	ret = write(fd, &pics, sizeof(pics));
-	log_debug("Sending PIC");
+	log_debug("%s: Sending PIC", __func__);
 }
 
 
@@ -662,6 +662,6 @@ void
 i8259_restore(FILE *fp) {
 	int ret;
 	ret = fread(&pics, 1,  sizeof(pics), fp);
-	log_debug("Receiving PIC");
+	log_debug("%s: Receiving PIC", __func__);
 }
 
